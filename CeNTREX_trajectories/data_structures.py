@@ -68,7 +68,6 @@ class Gravity:
     gy: float
     gz: float
 
-
 @dataclass
 class Velocity:
     """
@@ -179,7 +178,7 @@ class Velocities:
         self,
         sol: OptimizeResult,
         save_start: bool = True,
-        v_indices: npt.NDArray[np.int32] = np.ndarray([3, 4, 5]),
+        v_indices: npt.NDArray[np.int32] = np.array([3, 4, 5]),
     ) -> None:
         """
         Append to velocities from an ODE solution
@@ -321,7 +320,7 @@ class Coordinates:
         self,
         sol: OptimizeResult,
         save_start: bool = True,
-        x_indices: npt.NDArray[np.int32] = np.ndarray([0, 1, 2]),
+        x_indices: npt.NDArray[np.int32] = np.array([0, 1, 2]),
     ) -> None:
         """
         Append to coordinates from an ODE solution
