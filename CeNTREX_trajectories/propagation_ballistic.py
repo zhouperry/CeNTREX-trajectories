@@ -130,22 +130,21 @@ def propagate_ballistic_trajectories(
     # save coordinates and velocities at z positions z_save if supplied
     if z_save is not None:
         for z in z_save:
-            t = (z - accepted_coords.z) / accepted_velocities.vz
-            x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, gravity)
+            coords = accepted_coords.get_last()
+            vels = accepted_velocities.get_last()
+            t = (z - coords.z) / vels.vz
+            x, v = propagate_ballistic(t, coords, vels, gravity)
             t_accepted = np.column_stack([t_accepted, t + t_start[survive]])
             accepted_coords.column_stack(x)
             accepted_velocities.column_stack(v)
 
     # stop timestamps, coordinates and velocities
-    t = (z_stop - accepted_coords.z) / accepted_velocities.vz
-    x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, gravity)
+    coords = accepted_coords.get_last()
+    vels = accepted_velocities.get_last()
+    t = (z_stop - coords.z) / vels.vz
+    x, v = propagate_ballistic(t, coords, vels, gravity)
+
     t_accepted = np.column_stack([t_accepted, t + t_start[survive]])
     accepted_coords.column_stack(x)
     accepted_velocities.column_stack(v)
-    return (
-        survive,
-        t_accepted,
-        accepted_coords,
-        accepted_velocities,
-        nr_collisions,
-    )
+    return (survive, t_accepted, accepted_coords, accepted_velocities, nr_collisions)

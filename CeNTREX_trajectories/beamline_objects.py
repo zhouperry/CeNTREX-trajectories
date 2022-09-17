@@ -134,7 +134,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         )
         # force intercept to go through zero for the force by fitting a polynomial
         # that intercepts zero through the derivative as a function of r
-        R_ = np.vstack((r ** 6, r ** 5, r ** 4, r ** 3, r ** 2, r,)).T
+        R_ = np.vstack((r ** 6, r ** 5, r ** 4, r ** 3, r ** 2, r)).T
         y = self._poly_stark_derivative_radial(r)
         p = np.linalg.lstsq(R_, y, rcond=None)[0]
         p = np.append(p, [0])
@@ -165,9 +165,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         x: Union[npt.NDArray[np.float64], float],
         y: Union[npt.NDArray[np.float64], float],
         z: Union[npt.NDArray[np.float64], float],
-    ) -> Union[
-        List[npt.NDArray[np.float64]], List[float],
-    ]:
+    ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
         """
         Calculate the force at x,y,z
 
@@ -333,9 +331,7 @@ class MagnetostaticHexapoleLens(ODESection):
         x: Union[npt.NDArray[np.float64], float],
         y: Union[npt.NDArray[np.float64], float],
         z: Union[npt.NDArray[np.float64], float],
-    ) -> Union[
-        List[npt.NDArray[np.float64]], List[float],
-    ]:
+    ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
         """
         Calculate the force at x,y,z
 
@@ -434,6 +430,9 @@ class Aperture:
     def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
         raise NotImplementedError
 
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        raise NotImplementedError
+
 
 @dataclass
 class CircularAperture(Aperture):
@@ -464,6 +463,9 @@ class CircularAperture(Aperture):
             coords.z, self.z
         ), "supplied coordinates not at location of aperture"
         return (coords.x - self.x) ** 2 + (coords.y - self.y) ** 2 <= self.r ** 2
+
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        return (x - self.x) + (y - self.y) + (z - self.z)
 
 
 @dataclass
@@ -499,3 +501,63 @@ class RectangularAperture(Aperture):
         return (np.abs((coords.x - self.x)) <= self.wx / 2) & (
             np.abs((coords.y - self.y)) <= self.wy / 2
         )
+
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        x_factor = 0 if (x >= self.x - self.wx / 2 and x <= self.x + self.wx / 2) else 1
+        y_factor = 0 if (y >= self.y - self.wy / 2 and y <= self.y + self.wy / 2) else 1
+        return z - self.z + x_factor + y_factor
+
+
+@dataclass
+class PlateElectrodes:
+    x: float
+    y: float
+    z: float
+    length: float
+    width: float
+
+    def check_in_bounds(self, start: float, stop: float) -> bool:
+        return self.z >= start and self.z + self.length <= stop
+
+    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
+        return np.ones(coords.x.shape, dtype=np.bool_)
+
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        # for now assume electrode plates in y direction
+
+        # z_factor for checking if z coordinates are within electrodes
+        z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
+
+        # y_factor for checking if z coordinates are within electrodes
+        y_factor = (
+            0 if (y >= self.y - self.width / 2 and y <= self.y + self.width / 2) else 1
+        )
+        return (x - self.x) + y_factor + z_factor
+
+
+@dataclass
+class Bore:
+    x: float
+    y: float
+    z: float
+    length: float
+    radius: float
+
+    def check_in_bounds(self, start: float, stop: float) -> bool:
+        return self.z >= start and self.z + self.length <= stop
+
+    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
+        mask_z = (coords.z >= self.z) & (coords.z <= self.z + self.length)
+        mask_r = (
+            (coords.x - self.x) ** 2 + (coords.y - self.y) ** 2
+        ) > self.radius ** 2
+        accept_array = np.ones(coords.x.shape, dtype=np.bool_)
+        accept_array[mask_z & mask_r] = False
+        return accept_array
+
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        r_squared = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+
+        # z_factor for checking if z coordinates are within electrodes
+        z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
+        return r_squared - self.radius + z_factor
