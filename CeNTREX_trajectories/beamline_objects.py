@@ -64,7 +64,7 @@ class Section:
 
 
 class ODESection:
-    propagation_type = PropagationType.ode
+    propagation_type: PropagationType = PropagationType.ode
 
     def _check_objects(self):
         """
