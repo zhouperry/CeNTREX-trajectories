@@ -1,11 +1,13 @@
 from collections.abc import Iterable
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinates, Gravity, Velocities
+from .data_structures import Coordinates, Gravity, Velocities, Force
 from .propagation_options import PropagationOptions
+
+from copy import deepcopy
 
 __all__: List[str] = []
 
@@ -58,24 +60,55 @@ def calculate_time_ballistic(
         npt.NDArray[np.float64]: time to travel distance x
     """
     if np.alltrue(a == 0):
-        return x / v
+        t = x / v
+        if isinstance(t, np.ndarray):
+            t[t < 0] = np.nan
+        else:
+            t = np.nan if t < 0 else t
+        return t
+
     elif np.alltrue(a != 0):
-        return (np.sqrt(2 * a * x + v ** 2) - v) / a
+        t1 = (np.sqrt(2 * a * x + v ** 2) - v) / a
+        t2 = -(np.sqrt(2 * a * x + v ** 2) + v) / a
+        t = np.zeros(t1.shape)
+        m1 = t1 > 0
+        m2 = t2 > 0
+        t[m1] = t1[m1]
+        t[m2] = t2[m2]
+        t[~(m1 | m2)] = np.nan
+        return t
     else:
         if isinstance(a, Iterable):
-            return np.array([(np.sqrt(2 * ai * x + v ** 2) - v) / ai for ai in a])
+            t1 = np.array([(np.sqrt(2 * ai * x + v ** 2) - v) / ai for ai in a])
+            t2 = -np.array([(np.sqrt(2 * ai * x + v ** 2) - v) / ai for ai in a])
+            t = np.zeros(t1.shape)
+            m1 = t1 > 0
+            m2 = t2 > 0
+            t[m1] = t1[m1]
+            t[m2] = t2[m2]
+            t[~(m1 | m2)] = np.nan
+            return t
         else:
-            return (np.sqrt(2 * a * x + v ** 2) - v) / a
+            t1 = (np.sqrt(2 * a * x + v ** 2) - v) / a
+            t2 = -(np.sqrt(2 * a * x + v ** 2) + v) / a
+            t = np.zeros(t1.shape)
+            m1 = t1 > 0
+            m2 = t2 > 0
+            t[m1] = t1[m1]
+            t[m2] = t2[m2]
+            t[~(m1 | m2)] = np.nan
+            return t
 
 
 def propagate_ballistic_trajectories(
     t_start: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
-    apertures: List,
+    objects: List,
     z_stop: float,
     gravity: Gravity = Gravity(0.0, -9.81, 0.0),
-    z_save: Optional[list] = None,
+    z_save: Optional[Union[List[float], npt.NDArray[np.float64]]] = None,
+    save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[
     npt.NDArray[np.bool_], npt.NDArray[np.float64], Coordinates, Velocities, int
@@ -102,30 +135,56 @@ def propagate_ballistic_trajectories(
             ]: tuple with a boolean array of trajectories that survive, indices array
                 with indices that survive, coordinates, velocities and nr_colisions
     """
-    # create the survival mask array
-    survive = np.ones(origin.x.shape, dtype=bool)
+    collisions = []
+    indices = np.arange(origin.x.size)
+    accepted_coords = deepcopy(origin)
+    accepted_velocities = deepcopy(velocities)
+    t_accepted = deepcopy(t_start)
 
+    masks = []
     # iterate through apertures
-    for aperture in apertures:
+    for obj in objects:
         # distance
-        dz = aperture.z - origin.z
+        dz = obj.z_stop - accepted_coords.z
         # velocity
-        vz = velocities.vz
+        vz = accepted_velocities.vz
         # gravity
         gz = gravity.gz
         t = calculate_time_ballistic(dz, vz, gz)
-        if calculate_time_ballistic(z_stop - origin.z[0], velocities.vz[0], gz) <= t[0]:
+        if (
+            calculate_time_ballistic(
+                z_stop - accepted_coords.z[0], accepted_velocities.vz[0], gz
+            )
+            <= t[0]
+        ):
             continue
 
-        x, v = propagate_ballistic(t, origin, velocities, gravity)
-        survive &= aperture.get_acceptance(x)
-        survive &= ~np.isnan(t)
+        x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, gravity)
+        acceptance = obj.get_acceptance(
+            accepted_coords, x, accepted_velocities, gravity
+        )
+        acceptance &= ~np.isnan(t)
 
+        if save_collisions:
+            if type(obj).__name__ == "PlateElectrodes":
+                collisions.append(
+                    obj.get_collisions(
+                        accepted_coords, x, accepted_velocities, gravity
+                    )[1:]
+                )
+            else:
+                collisions.append(
+                    (x.get_masked(~acceptance), v.get_masked(~acceptance))
+                )
+
+        accepted_coords = accepted_coords.get_masked(acceptance)
+        accepted_velocities = accepted_velocities.get_masked(acceptance)
+        t_accepted = t_accepted[acceptance]
+        indices = indices[acceptance]
+
+    survive = np.zeros(origin.x.size, dtype=bool)
+    survive[indices] = True
     nr_collisions = survive.size - survive.sum()
-
-    t_accepted = t_start[survive]
-    accepted_coords = origin.get_masked(survive)
-    accepted_velocities = velocities.get_masked(survive)
 
     # save coordinates and velocities at z positions z_save if supplied
     if z_save is not None:
@@ -147,4 +206,11 @@ def propagate_ballistic_trajectories(
     t_accepted = np.column_stack([t_accepted, t + t_start[survive]])
     accepted_coords.column_stack(x)
     accepted_velocities.column_stack(v)
-    return (survive, t_accepted, accepted_coords, accepted_velocities, nr_collisions)
+    return (
+        survive,
+        t_accepted,
+        accepted_coords,
+        accepted_velocities,
+        nr_collisions,
+        collisions,
+    )

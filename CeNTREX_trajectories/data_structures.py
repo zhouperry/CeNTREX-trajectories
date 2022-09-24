@@ -52,6 +52,14 @@ class Force:
     fy: float
     fz: float
 
+    def __add__(self, other) -> Force:
+        if isinstance(other, Force):
+            return Force(self.fx + other.fx, self.fy + other.fy, self.fz + other.fz)
+        elif isinstance(other, Gravity):
+            return Force(self.fx + other.gx, self.fy + other.gy, self.fz + other.gz)
+        else:
+            raise ValueError("Cannot add non-force object to force object")
+
 
 @dataclass
 class Gravity:
@@ -67,6 +75,13 @@ class Gravity:
     gx: float
     gy: float
     gz: float
+
+    def __add__(self, other) -> Union[Force, Gravity]:
+        if isinstance(other, Force):
+            return Force(self.gx + other.fx, self.gy + other.fy, self.gz + other.fz)
+        elif isinstance(other, Gravity):
+            return Gravity(self.gx + other.gx, self.gy + other.gy, self.gz + other.gz)
+
 
 @dataclass
 class Velocity:

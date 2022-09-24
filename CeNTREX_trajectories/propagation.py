@@ -1,9 +1,10 @@
 import copy
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 
+from .beamline_objects import ODESection, Section
 from .data_structures import (
     Coordinates,
     Gravity,
@@ -21,7 +22,7 @@ __all__: List[str] = ["PropagationType", "propagate_trajectories", "PropagationO
 
 
 def propagate_trajectories(
-    sections: List,
+    sections: List[Union[Section, ODESection]],
     coordinates_init: Coordinates,
     velocities_init: Velocities,
     particle: Particle,
@@ -99,6 +100,7 @@ def propagate_trajectories(
                 coord_list,
                 velocities_list,
                 nr_collisions,
+                collisions,
             ) = propagate_ballistic_trajectories(
                 t_start,
                 coords_start,
@@ -107,6 +109,7 @@ def propagate_trajectories(
                 section.stop,
                 gravity,
                 z_save=z_save_section,
+                save_collisions=section.save_collisions,
                 options=options,
             )
             timestamps_tracked = timestamps_tracked[mask]
@@ -125,7 +128,9 @@ def propagate_trajectories(
                     indices, timestamp_list, coord_list, velocities_list
                 ):
                     trajectories.add_data(index, t, c, v)
-            section_data.append(SectionData(section.name, [], nr_collisions, len(mask)))
+            section_data.append(
+                SectionData(section.name, collisions, nr_collisions, len(mask))
+            )
             t_start = copy.copy(timestamp_list[:, -1])
             coords_start = coord_list.get_last()
             velocities_start = velocities_list.get_last()

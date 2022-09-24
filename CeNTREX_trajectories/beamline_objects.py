@@ -2,13 +2,14 @@ import pickle
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinates, Force
-from .propagation import PropagationType
+from .data_structures import Coordinate, Coordinates, Force, Velocities
+from .propagation_options import PropagationType
+from .propagation_ballistic import propagate_ballistic, calculate_time_ballistic
 from .particles import Particle
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "MagnetostaticHexapoleLens",
     "CircularAperture",
     "RectangularAperture",
+    "PlateElectrodes",
+    "Bore",
 ]
 
 path = Path(__file__).resolve().parent
@@ -427,7 +430,9 @@ class Aperture:
         """
         return (self.z >= start) & (self.z <= stop)
 
-    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
         raise NotImplementedError
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
@@ -448,7 +453,13 @@ class CircularAperture(Aperture):
 
     r: float
 
-    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
+    @property
+    def z_stop(self):
+        return self.z
+
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
         """
         check if the supplied coordinates are within the aperture
 
@@ -460,9 +471,9 @@ class CircularAperture(Aperture):
             aperture
         """
         assert np.allclose(
-            coords.z, self.z
+            stop.z, self.z
         ), "supplied coordinates not at location of aperture"
-        return (coords.x - self.x) ** 2 + (coords.y - self.y) ** 2 <= self.r ** 2
+        return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r ** 2
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
         return (x - self.x) + (y - self.y) + (z - self.z)
@@ -484,7 +495,13 @@ class RectangularAperture(Aperture):
     wx: float
     wy: float
 
-    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
+    @property
+    def z_stop(self):
+        return self.z
+
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
         """
         check if the supplied coordinates are within the aperture
 
@@ -496,10 +513,10 @@ class RectangularAperture(Aperture):
             aperture
         """
         assert np.allclose(
-            coords.z, self.z
+            stop.z, self.z
         ), "supplied coordinates not at location of aperture"
-        return (np.abs((coords.x - self.x)) <= self.wx / 2) & (
-            np.abs((coords.y - self.y)) <= self.wy / 2
+        return (np.abs((stop.x - self.x)) <= self.wx / 2) & (
+            np.abs((stop.y - self.y)) <= self.wy / 2
         )
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
@@ -515,12 +532,54 @@ class PlateElectrodes:
     z: float
     length: float
     width: float
+    separation: float
+
+    @property
+    def z_stop(self):
+        return self.z + self.length
 
     def check_in_bounds(self, start: float, stop: float) -> bool:
         return self.z >= start and self.z + self.length <= stop
 
-    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
-        return np.ones(coords.x.shape, dtype=np.bool_)
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
+        m, _, _ = self.get_collisions(start, stop, vels, force)
+        return ~m
+
+    def get_collisions(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> Tuple[Coordinates, Velocities]:
+        t = np.zeros(start.x.shape)
+
+        dx_upper = (self.x + self.separation / 2) - start.x
+        dy_upper = (self.x - self.separation / 2) - start.x
+
+        m_inside = (start.x > (self.x - self.separation / 2)) & (
+            start.x < (self.x + self.separation / 2)
+        )
+        m_below = start.x < (self.x - self.separation / 2)
+        m_above = start.x > (self.x + self.separation / 2)
+        m_vpos = vels.vx > 0
+        m_vneg = vels.vx < 0
+
+        m = m_inside & m_vpos
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.gx)
+
+        m = m_inside & m_vneg
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.gx)
+
+        m = m_below & m_vpos
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.gx)
+
+        m = m_above & m_vneg
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.gx)
+
+        x, v = propagate_ballistic(t, start, vels, force)
+        m = x.z <= (self.z + self.length)
+        m &= x.z >= self.z
+        m &= np.abs(x.y - self.y) <= self.width / 2
+        return m, x.get_masked(m), v.get_masked(m)
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
         # for now assume electrode plates in y direction
@@ -529,10 +588,12 @@ class PlateElectrodes:
         z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
 
         # y_factor for checking if z coordinates are within electrodes
-        y_factor = (
-            0 if (y >= self.y - self.width / 2 and y <= self.y + self.width / 2) else 1
+        x_factor = (
+            0
+            if (x >= self.x - self.separation / 2 and x <= self.x + self.separation / 2)
+            else 1
         )
-        return (x - self.x) + y_factor + z_factor
+        return (x - self.x) + x_factor + z_factor
 
 
 @dataclass
