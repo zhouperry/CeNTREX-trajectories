@@ -37,7 +37,7 @@ There is support for ballistic and ODE solver trajectories, which is specified o
 ## Working example
 ```Python
 import numpy as np
-from CeNTREX_trajectories import (
+from centrex_trajectories import (
     CircularAperture,
     Coordinates,
     Velocities,

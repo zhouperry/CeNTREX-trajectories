@@ -2,7 +2,7 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-from CeNTREX_trajectories import (
+from centrex_trajectories import (
     CircularAperture,
     Coordinates,
     ElectrostaticQuadrupoleLens,
@@ -87,7 +87,7 @@ spa = Section(
     [
         CircularAperture(0, 0, bbexit.stop + 19.6 * 0.0254, 1.75 * 2 / 0.0254),
         CircularAperture(
-            0, 0, bbexit.stop + (19.6 + 0.375 + 9.625) * 0.0254, 1.75 / 2 * 0.0254,
+            0, 0, bbexit.stop + (19.6 + 0.375 + 9.625) * 0.0254, 1.75 / 2 * 0.0254
         ),
     ],
     bbexit.stop,
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         TimeRemainingColumn(),
     )
     panel = Panel("")
-    group = Group(panel, progress,)
+    group = Group(panel, progress)
     data = [[]]
     throughput_list, particles_detected_list = [], []
     with Live(group, refresh_per_second=1) as live:
@@ -229,9 +229,9 @@ if __name__ == "__main__":
             )
             sigma = np.sqrt(sigma)
 
-            p = ax.errorbar(Vs, gain, yerr=sigma, lw=2, label=f"L={L:.1f}",)
+            p = ax.errorbar(Vs, gain, yerr=sigma, lw=2, label=f"L={L:.1f}")
             ax.fill_between(
-                Vs, gain - sigma, gain + sigma, color=p[0].get_color(), alpha=0.5,
+                Vs, gain - sigma, gain + sigma, color=p[0].get_color(), alpha=0.5
             )
     ax.grid(True)
     ax.legend()
@@ -258,9 +258,9 @@ if __name__ == "__main__":
     # print(ys.shape, Vs.shape)
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    p = ax.errorbar(Vs, ymeans, yerr=sigmas, lw=2, label=f"L={L:.1f}",)
+    p = ax.errorbar(Vs, ymeans, yerr=sigmas, lw=2, label=f"L={L:.1f}")
     ax.fill_between(
-        Vs, ymeans - sigmas, ymeans + sigmas, color=p[0].get_color(), alpha=0.5,
+        Vs, ymeans - sigmas, ymeans + sigmas, color=p[0].get_color(), alpha=0.5
     )
     ax.grid(True)
     ax.legend()
