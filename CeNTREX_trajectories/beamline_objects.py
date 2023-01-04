@@ -18,6 +18,7 @@ __all__ = [
     "MagnetostaticHexapoleLens",
     "CircularAperture",
     "RectangularAperture",
+    "RectangularApertureFinite",
     "PlateElectrodes",
     "Bore",
 ]
@@ -522,6 +523,67 @@ class RectangularAperture(Aperture):
     def collision_event_function(self, x: float, y: float, z: float) -> float:
         x_factor = 0 if (x >= self.x - self.wx / 2 and x <= self.x + self.wx / 2) else 1
         y_factor = 0 if (y >= self.y - self.wy / 2 and y <= self.y + self.wy / 2) else 1
+        return z - self.z + x_factor + y_factor
+
+
+@dataclass
+class RectangularApertureFinite(Aperture):
+    """
+    Rectangular aperture
+
+    Attributes:
+        x (float): x coordinate [m]
+        y (float): y coordinate [m]
+        z (float): z coordinate [m]
+        wx (float): width of the aperture [m]
+        wy (float): height of the aperture [m]
+        wxp (float): width of the plate the aperture is in [m]
+        wyp (float): height of the plate the aperure is in [m]
+    """
+
+    wx: float
+    wy: float
+    wxp: float
+    wyp: float
+
+    @property
+    def z_stop(self):
+        return self.z
+
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
+        """
+        check if the supplied coordinates are within the aperture
+
+        Args:
+            start (Coordinates): start coordinates
+            stop (Coordinates): stop coordinates
+            vels (Velocities): velocities of the particles
+            force (Force): force acting on the particles
+
+        Returns:
+            np.ndarray: boolean array where True indicates coordinates are within the
+            aperture
+        """
+        assert np.allclose(
+            stop.z, self.z
+        ), "supplied coordinates not at location of aperture"
+        inside_aperture = (np.abs((stop.x - self.x)) <= self.wx / 2) & (
+            np.abs((stop.y - self.y)) <= self.wy / 2
+        )
+        outside_plate = (np.abs((stop.x - self.x)) >= self.wxp / 2) & (
+            np.abs((stop.y - self.y)) >= self.wyp / 2
+        )
+        return inside_aperture | outside_plate
+
+    def collision_event_function(self, x: float, y: float, z: float) -> float:
+        inside_aperture_x = (x >= self.x - self.wx / 2) and (x <= self.x + self.wx / 2)
+        outside_plate_x = (x >= self.x + self.wxp / 2) or (x <= self.x - self.wxp / 2)
+        inside_aperture_y = (y >= self.y - self.wy / 2) and (y <= self.y + self.wy / 2)
+        outside_plate_y = (y >= self.y + self.wyp / 2) or (y <= self.y - self.wyp / 2)
+        x_factor = 0 if inside_aperture_x or outside_plate_x else 1
+        y_factor = 0 if inside_aperture_y or outside_plate_y else 1
         return z - self.z + x_factor + y_factor
 
 
