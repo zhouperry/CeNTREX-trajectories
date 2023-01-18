@@ -1,13 +1,12 @@
 from collections.abc import Iterable
+from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinates, Gravity, Velocities, Force
+from .data_structures import Coordinates, Force, Gravity, Velocities
 from .propagation_options import PropagationOptions
-
-from copy import deepcopy
 
 __all__: List[str] = []
 
@@ -33,9 +32,9 @@ def propagate_ballistic(
     """
     return (
         Coordinates(
-            origin.x + velocities.vx * t + 1 / 2 * gravity.gx * t ** 2,
-            origin.y + velocities.vy * t + 1 / 2 * gravity.gy * t ** 2,
-            origin.z + velocities.vz * t + 1 / 2 * gravity.gz * t ** 2,
+            origin.x + velocities.vx * t + 1 / 2 * gravity.gx * t**2,
+            origin.y + velocities.vy * t + 1 / 2 * gravity.gy * t**2,
+            origin.z + velocities.vz * t + 1 / 2 * gravity.gz * t**2,
         ),
         Velocities(
             velocities.vx + gravity.gx * t,
@@ -68,8 +67,8 @@ def calculate_time_ballistic(
         return t
 
     elif np.alltrue(a != 0):
-        t1 = (np.sqrt(2 * a * x + v ** 2) - v) / a
-        t2 = -(np.sqrt(2 * a * x + v ** 2) + v) / a
+        t1 = (np.sqrt(2 * a * x + v**2) - v) / a
+        t2 = -(np.sqrt(2 * a * x + v**2) + v) / a
         t = np.zeros(t1.shape)
         m1 = t1 > 0
         m2 = t2 > 0
@@ -79,8 +78,8 @@ def calculate_time_ballistic(
         return t
     else:
         if isinstance(a, Iterable):
-            t1 = np.array([(np.sqrt(2 * ai * x + v ** 2) - v) / ai for ai in a])
-            t2 = -np.array([(np.sqrt(2 * ai * x + v ** 2) - v) / ai for ai in a])
+            t1 = np.array([(np.sqrt(2 * ai * x + v**2) - v) / ai for ai in a])
+            t2 = -np.array([(np.sqrt(2 * ai * x + v**2) - v) / ai for ai in a])
             t = np.zeros(t1.shape)
             m1 = t1 > 0
             m2 = t2 > 0
@@ -89,8 +88,8 @@ def calculate_time_ballistic(
             t[~(m1 | m2)] = np.nan
             return t
         else:
-            t1 = (np.sqrt(2 * a * x + v ** 2) - v) / a
-            t2 = -(np.sqrt(2 * a * x + v ** 2) + v) / a
+            t1 = (np.sqrt(2 * a * x + v**2) - v) / a
+            t2 = -(np.sqrt(2 * a * x + v**2) + v) / a
             t = np.zeros(t1.shape)
             m1 = t1 > 0
             m2 = t2 > 0
@@ -141,7 +140,6 @@ def propagate_ballistic_trajectories(
     accepted_velocities = deepcopy(velocities)
     t_accepted = deepcopy(t_start)
 
-    masks = []
     # iterate through apertures
     for obj in objects:
         # distance
@@ -188,22 +186,29 @@ def propagate_ballistic_trajectories(
 
     # save coordinates and velocities at z positions z_save if supplied
     if z_save is not None:
-        for z in z_save:
+        for idz, z in enumerate(z_save):
             coords = accepted_coords.get_last()
             vels = accepted_velocities.get_last()
-            t = (z - coords.z) / vels.vz
-            x, v = propagate_ballistic(t, coords, vels, gravity)
-            t_accepted = np.column_stack([t_accepted, t + t_start[survive]])
+            dz = z - coords.z
+            dt = calculate_time_ballistic(dz, vels.vz, gravity.gz)
+            x, v = propagate_ballistic(dt, coords, vels, gravity)
+            if idz != 0:
+                t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])
+            else:
+                t_accepted = np.column_stack([t_accepted, t_accepted + dt])
             accepted_coords.column_stack(x)
             accepted_velocities.column_stack(v)
 
     # stop timestamps, coordinates and velocities
     coords = accepted_coords.get_last()
     vels = accepted_velocities.get_last()
-    t = (z_stop - coords.z) / vels.vz
-    x, v = propagate_ballistic(t, coords, vels, gravity)
+    dt = (z_stop - coords.z) / vels.vz
+    x, v = propagate_ballistic(dt, coords, vels, gravity)
 
-    t_accepted = np.column_stack([t_accepted, t + t_start[survive]])
+    if z_save is not None and len(z_save) > 0:
+        t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])
+    else:
+        t_accepted = np.column_stack([t_accepted, t_accepted + dt])
     accepted_coords.column_stack(x)
     accepted_velocities.column_stack(v)
     return (
