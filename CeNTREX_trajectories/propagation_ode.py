@@ -47,7 +47,9 @@ def solve_ode(*args) -> OptimizeResult:
     t_span = [t, t + 2 * (z_stop - x.z) / v.vz]
     event = z_stop_event_generator(z_stop)
     p = [x.x, x.y, x.z, v.vx, v.vy, v.vz]
-    _ode_fun = partial(ode_fun, **{"mass": mass, "force": force, "gravity": gravity})
+    _ode_fun = partial(
+        ode_fun, **{"mass": mass, "force_fn": force, "force_cst": gravity}
+    )
     sol = solve_ivp(_ode_fun, t_span, p, events=[event], rtol=1e-7, atol=1e-7)
     return sol
 
@@ -56,7 +58,7 @@ def ode_fun(
     t: Union[float, npt.NDArray[np.float64]],
     d: List[float],
     mass: float,
-    force_fun: Callable,
+    force_fn: Callable,
     force_cst: Force,
 ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
     """
@@ -74,7 +76,7 @@ def ode_fun(
                                                             ODE
     """
     x, y, z, vx, vy, vz = d
-    fx, fy, fz = force_fun(x, y, z)
+    fx, fy, fz = force_fn(x, y, z)
     ax = fx / mass
     ay = fy / mass
     az = fz / mass
