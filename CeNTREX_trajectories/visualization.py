@@ -1,6 +1,7 @@
 from typing import List, Optional, Union
 
 import matplotlib.axes as axes
+import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 
@@ -12,15 +13,15 @@ __all__ = ["plot_beamline"]
 def plot_beamline(
     sections: List[Union[Section, ODESection]],
     ax: Optional[axes.Axes] = None,
-    facecolor="C0",
-    edgecolor="k",
-    alpha=0.5,
+    facecolor: str = "C0",
+    edgecolor: str = "k",
+    alpha: float = 0.5,
 ):
     objects = []
     for section in sections:
         objects.extend(section.objects)
 
-    height = 0
+    height = 0.0
     for obj in objects:
         if isinstance(obj, CircularAperture):
             if height <= (obj.y + obj.r) * 2:
@@ -35,6 +36,9 @@ def plot_beamline(
 
     # Create patch collection with specified colour/alpha
     pc = PatchCollection(patches, facecolor=facecolor, alpha=alpha, edgecolor=edgecolor)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
 
     for obj in objects:
         if isinstance(obj, CircularAperture):

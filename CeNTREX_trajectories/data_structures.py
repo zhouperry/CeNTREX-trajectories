@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import Union, List, Any
+from typing import Any, List, Union
 
 import numpy as np
 import numpy.typing as npt
 from scipy.optimize import OptimizeResult
 
-__all__: List[str] = ["Gravity", "Force", "Velocities", "Coordinates", "Trajectories"]
+__all__: List[str] = ["Force", "Force", "Velocities", "Coordinates", "Trajectories"]
 
 
 @dataclass(frozen=True)
@@ -55,32 +55,11 @@ class Force:
     def __add__(self, other) -> Force:
         if isinstance(other, Force):
             return Force(self.fx + other.fx, self.fy + other.fy, self.fz + other.fz)
-        elif isinstance(other, Gravity):
-            return Force(self.fx + other.gx, self.fy + other.gy, self.fz + other.gz)
         else:
-            raise ValueError("Cannot add non-force object to force object")
+            raise TypeError(f"can only add Force (not {type(other)}) to Force")
 
 
-@dataclass
-class Gravity:
-    """
-    Gravity
-
-    Attributes:
-        gx (float): gravitational acceleration in x [m/s^2]
-        gy (float): gravitational acceleration in y [m/s^2]
-        gz (float): gravitational acceleration in z [m/s^2]
-    """
-
-    gx: float
-    gy: float
-    gz: float
-
-    def __add__(self, other) -> Union[Force, Gravity]:
-        if isinstance(other, Force):
-            return Force(self.gx + other.fx, self.gy + other.fy, self.gz + other.fz)
-        elif isinstance(other, Gravity):
-            return Gravity(self.gx + other.gx, self.gy + other.gy, self.gz + other.gz)
+Force = Force
 
 
 @dataclass
@@ -166,6 +145,18 @@ class Velocities:
                 return c
             else:
                 raise StopIteration
+
+    def __eq__(self, other):
+        if not isinstance(other, Velocities):
+            return False
+        elif (
+            np.all(self.vx == other.vx)
+            and np.all(self.vy == other.vy)
+            and np.all(self.vz == other.vz)
+        ):
+            return True
+        else:
+            return False
 
     def append(self, velocities: Velocities) -> None:
         """
@@ -308,6 +299,18 @@ class Coordinates:
                 return c
             else:
                 raise StopIteration
+
+    def __eq__(self, other):
+        if not isinstance(other, Coordinates):
+            return False
+        elif (
+            np.all(self.x == other.x)
+            and np.all(self.y == other.y)
+            and np.all(self.z == other.z)
+        ):
+            return True
+        else:
+            return False
 
     def append(self, coordinates: Coordinates) -> None:
         """

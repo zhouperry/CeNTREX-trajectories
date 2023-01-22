@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Optional, Union, List
+from typing import Callable, List, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -7,7 +7,7 @@ from joblib import Parallel, delayed
 from scipy.integrate import solve_ivp
 from scipy.optimize import OptimizeResult
 
-from .data_structures import Coordinates, Gravity, Velocities
+from .data_structures import Coordinates, Force, Velocities
 from .propagation_options import PropagationOptions
 
 __all__: List[str] = []
@@ -26,7 +26,8 @@ def z_stop_event_generator(z_stop: float) -> Callable:
     """
 
     def event(
-        t: Union[float, npt.NDArray[np.float64]], y: npt.NDArray[np.float64],
+        t: Union[float, npt.NDArray[np.float64]],
+        y: npt.NDArray[np.float64],
     ) -> float:
         return y[2] - z_stop
 
@@ -55,8 +56,8 @@ def ode_fun(
     t: Union[float, npt.NDArray[np.float64]],
     d: List[float],
     mass: float,
-    force: Callable,
-    gravity: Gravity,
+    force_fun: Callable,
+    force_cst: Force,
 ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
     """
     General function describing the RHS of trajectory propagation
@@ -73,7 +74,7 @@ def ode_fun(
                                                             ODE
     """
     x, y, z, vx, vy, vz = d
-    fx, fy, fz = force(x, y, z)
+    fx, fy, fz = force_fun(x, y, z)
     ax = fx / mass
     ay = fy / mass
     az = fz / mass
@@ -81,9 +82,9 @@ def ode_fun(
         vx,
         vy,
         vz,
-        ax + gravity.gx,
-        ay + gravity.gy,
-        az + gravity.gz,
+        ax + force_cst.fx,
+        ay + force_cst.fy,
+        az + force_cst.fz,
     ]
 
 
@@ -93,8 +94,8 @@ def propagate_ODE_trajectories(
     velocities: Velocities,
     z_stop: float,
     mass: float,
-    force: Callable,
-    gravity: Gravity = Gravity(0.0, -9.81, 0.0),
+    force_fun: Callable,
+    force_cst: Force = Force(0.0, -9.81, 0.0),
     z_save: Optional[
         Union[List[Union[float, int]], npt.NDArray[Union[np.float64, np.int32]]]
     ] = None,
@@ -109,9 +110,9 @@ def propagate_ODE_trajectories(
         velocities (Velocities): velocities
         z_stop (float): z position to stop integration
         mass (float): mass of particle
-        force (Callable): function describing the force as a function of time and
+        force_fun (Callable): function describing the force as a function of time and
                             position
-        gravity (Gravity, optional): gravity. Defaults to Gravity(0.0, -9.81, 0.0).
+        force_cst (Force, optional): force. Defaults to Force(0.0, -9.81, 0.0), gravity.
         z_save (Optional[
                     Union[
                         List[Union[float, int]],
@@ -126,7 +127,7 @@ def propagate_ODE_trajectories(
         _type_: _description_
     """
     solutions = Parallel(n_jobs=options.n_cores, verbose=int(options.verbose))(
-        delayed(solve_ode)(t, x, v, z_stop, mass, force, gravity)
+        delayed(solve_ode)(t, x, v, z_stop, mass, force_fun, force_cst)
         for t, x, v in zip(t_start, origin, velocities)
     )
     return solutions

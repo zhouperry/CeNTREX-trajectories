@@ -1,5 +1,4 @@
 import pickle
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, Union
@@ -7,10 +6,10 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinate, Coordinates, Force, Velocities
-from .propagation_options import PropagationType
-from .propagation_ballistic import propagate_ballistic, calculate_time_ballistic
+from .data_structures import Coordinates, Force, Velocities
 from .particles import Particle
+from .propagation_ballistic import calculate_time_ballistic, propagate_ballistic
+from .propagation_options import PropagationType
 
 __all__ = [
     "Section",
@@ -70,6 +69,20 @@ class Section:
 class ODESection:
     propagation_type: PropagationType = PropagationType.ode
 
+    def __init__(
+        self,
+        name: str,
+        objects: List[Any],
+        start: float,
+        stop: float,
+        save_collisions: bool,
+    ):
+        self.name = name
+        self.objects = objects
+        self.start = start
+        self.stop = stop
+        self.save_collisions = save_collisions
+
     def _check_objects(self):
         """
         Check if all objects reside fully inside the section, runs upon initializatin.
@@ -96,7 +109,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         stop: float,
         V: float,
         R: float,
-        save_collisions: Optional[bool] = False,
+        save_collisions: bool = False,
     ) -> None:
         """
         Electrostatic Quadrupole Lens Section
@@ -112,13 +125,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
                                                     velocities of collisions in this
                                                     section. Defaults to False.
         """
-        self.name = name
-        self.objects = objects
-        self.start = start
-        self.stop = stop
+        super().__init__(name, objects, start, stop, save_collisions)
         self.V = V
         self.R = R
-        self.save_collisions = save_collisions
         self._check_objects()
         self._initialize_potentials()
 
@@ -138,7 +147,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         )
         # force intercept to go through zero for the force by fitting a polynomial
         # that intercepts zero through the derivative as a function of r
-        R_ = np.vstack((r ** 6, r ** 5, r ** 4, r ** 3, r ** 2, r)).T
+        R_ = np.vstack((r**6, r**5, r**4, r**3, r**2, r)).T
         y = self._poly_stark_derivative_radial(r)
         p = np.linalg.lstsq(R_, y, rcond=None)[0]
         p = np.append(p, [0])
@@ -162,7 +171,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[NDArray[np.float64], float]: electric field at x,y,z in V/m
         """
-        return 2 * self.V * np.sqrt(x ** 2 + y ** 2) / (self.R) ** 2
+        return 2 * self.V * np.sqrt(x**2 + y**2) / (self.R) ** 2
 
     def force(
         self,
@@ -181,7 +190,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             List: force in x, y and z
         """
-        r = np.sqrt(x ** 2 + y ** 2)
+        r = np.sqrt(x**2 + y**2)
         dx = x / r
         dy = y / r
         stark = -self._poly_stark_derivative_radial(r)
@@ -204,7 +213,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[np.ndarray, float]: radial derivative of stark potential
         """
-        return self._poly_stark_derivative_radial(np.sqrt(x ** 2 + y ** 2))
+        return self._poly_stark_derivative_radial(np.sqrt(x**2 + y**2))
 
     def stark_potential(
         self,
@@ -352,8 +361,8 @@ class MagnetostaticHexapoleLens(ODESection):
         # μ points in the direction of B for a sufficiently large field (e.g. in the
         # hexapole), so μ points along x/r, y/r, 0
 
-        fx = -2 * x * self.Bar / self.Rin ** 2 * self.particle.magnetic_moment
-        fy = -2 * y * self.Bar / self.Rin ** 2 * self.particle.magnetic_moment
+        fx = -2 * x * self.Bar / self.Rin**2 * self.particle.magnetic_moment
+        fy = -2 * y * self.Bar / self.Rin**2 * self.particle.magnetic_moment
         fz = fx * 0.0
         return [fx, fy, fz]
 
@@ -394,7 +403,7 @@ class MagnetostaticHexapoleLens(ODESection):
         y: Union[npt.NDArray[np.float64], float],
         z: Union[npt.NDArray[np.float64], float],
     ) -> Union[List[float], List[npt.NDArray[np.float64]]]:
-        r = np.sqrt(x ** 2 + y ** 2)
+        r = np.sqrt(x**2 + y**2)
         ϕ = np.arctan2(y, x)
         Br, Bϕ, Bz = self.magnetic_field_cylindrical(r, ϕ, z)
         Bx = np.cos(ϕ) * Br - np.sin(ϕ) * Bϕ
@@ -474,7 +483,7 @@ class CircularAperture(Aperture):
         assert np.allclose(
             stop.z, self.z
         ), "supplied coordinates not at location of aperture"
-        return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r ** 2
+        return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r**2
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
         return (x - self.x) + (y - self.y) + (z - self.z)
@@ -611,7 +620,7 @@ class PlateElectrodes:
 
     def get_collisions(
         self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
-    ) -> Tuple[Coordinates, Velocities]:
+    ) -> Tuple[npt.NDArray[np.bool_], Coordinates, Velocities]:
         t = np.zeros(start.x.shape)
 
         dx_upper = (self.x + self.separation / 2) - start.x
@@ -626,16 +635,16 @@ class PlateElectrodes:
         m_vneg = vels.vx < 0
 
         m = m_inside & m_vpos
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.gx)
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.fx)
 
         m = m_inside & m_vneg
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.gx)
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.fx)
 
         m = m_below & m_vpos
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.gx)
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.fx)
 
         m = m_above & m_vneg
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.gx)
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.fx)
 
         x, v = propagate_ballistic(t, start, vels, force)
         m = x.z <= (self.z + self.length)
@@ -673,7 +682,7 @@ class Bore:
         mask_z = (coords.z >= self.z) & (coords.z <= self.z + self.length)
         mask_r = (
             (coords.x - self.x) ** 2 + (coords.y - self.y) ** 2
-        ) > self.radius ** 2
+        ) > self.radius**2
         accept_array = np.ones(coords.x.shape, dtype=np.bool_)
         accept_array[mask_z & mask_r] = False
         return accept_array

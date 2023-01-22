@@ -7,7 +7,7 @@ import numpy.typing as npt
 from .beamline_objects import ODESection, Section
 from .data_structures import (
     Coordinates,
-    Gravity,
+    Force,
     SectionData,
     Trajectories,
     Trajectory,
@@ -27,7 +27,7 @@ def propagate_trajectories(
     velocities_init: Velocities,
     particle: Particle,
     t_start: Optional[npt.NDArray[np.float64]] = None,
-    gravity: Gravity = Gravity(0.0, -9.81, 0.0),
+    force: Force = Force(0.0, -9.81, 0.0),
     z_save: Optional[List] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[List[SectionData], Trajectories]:
@@ -42,7 +42,7 @@ def propagate_trajectories(
         particle (Particle): particle to propagate
         t_start (Optional[npt.NDArray[np.float64]], optional): initial timestamps.
                                                                 Defaults to None.
-        gravity (Gravity, optional): Gravity. Defaults to Gravity(0.0, -9.81, 0.0).
+        force (Force, optional): Force. Defaults to Force(0.0, -9.81, 0.0), gravity.
         z_save (Optional[List], optional): z positions to save timestamps, coordinates
                                             and velocities. Defaults to None.
         options (PropagationOptions): Propagation options. Defaults to
@@ -79,7 +79,7 @@ def propagate_trajectories(
     for section in sections:
         if z_save is not None:
             # select z positions from z_save that are within the section
-            z_save_section = [
+            z_save_section: Optional[List[float]] = [
                 zs for zs in z_save if zs >= section.start and zs <= section.stop
             ]
         else:
@@ -107,7 +107,7 @@ def propagate_trajectories(
                 velocities_start,
                 section.objects,
                 section.stop,
-                gravity,
+                force,
                 z_save=z_save_section,
                 save_collisions=section.save_collisions,
                 options=options,
@@ -151,7 +151,7 @@ def propagate_trajectories(
                 section.stop,
                 particle.mass,
                 section.force,
-                gravity=gravity,
+                force_cst=force,
                 options=options,
             )
             coords = []

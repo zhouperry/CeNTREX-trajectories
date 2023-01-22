@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinates, Force, Gravity, Velocities
+from .data_structures import Coordinates, Force, Velocities
 from .propagation_options import PropagationOptions
 
 __all__: List[str] = []
@@ -15,7 +15,7 @@ def propagate_ballistic(
     t: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
-    gravity: Gravity,
+    force: Force,
 ) -> Tuple[Coordinates, Velocities]:
     """
     Propagate trajectories starting at `origin` with `velocities` for a time `t`
@@ -32,26 +32,26 @@ def propagate_ballistic(
     """
     return (
         Coordinates(
-            origin.x + velocities.vx * t + 1 / 2 * gravity.gx * t**2,
-            origin.y + velocities.vy * t + 1 / 2 * gravity.gy * t**2,
-            origin.z + velocities.vz * t + 1 / 2 * gravity.gz * t**2,
+            origin.x + velocities.vx * t + 1 / 2 * force.fx * t**2,
+            origin.y + velocities.vy * t + 1 / 2 * force.fy * t**2,
+            origin.z + velocities.vz * t + 1 / 2 * force.fz * t**2,
         ),
         Velocities(
-            velocities.vx + gravity.gx * t,
-            velocities.vy + gravity.gy * t,
-            velocities.vz + gravity.gz * t,
+            velocities.vx + force.fx * t,
+            velocities.vy + force.fy * t,
+            velocities.vz + force.fz * t,
         ),
     )
 
 
 def calculate_time_ballistic(
-    x: npt.NDArray[np.float64], v: npt.NDArray[np.float64], a: float = 0.0
+    dx: npt.NDArray[np.float64], v: npt.NDArray[np.float64], a: float = 0.0
 ) -> npt.NDArray[np.float64]:
     """
     Calculate the time it takes a ballistic trajectory to travel a distance x
 
     Args:
-        x (npt.NDArray[np.float64]): distance
+        dx (npt.NDArray[np.float64]): distance
         v (npt.NDArray[np.float64]): velocity
         a (float, optional): acceleration. Defaults to 0.0.
 
@@ -59,16 +59,16 @@ def calculate_time_ballistic(
         npt.NDArray[np.float64]: time to travel distance x
     """
     if np.alltrue(a == 0):
-        t = x / v
+        t = dx / v
         if isinstance(t, np.ndarray):
             t[t < 0] = np.nan
-        else:
+        elif isinstance(t, (float, int)):
             t = np.nan if t < 0 else t
         return t
 
     elif np.alltrue(a != 0):
-        t1 = (np.sqrt(2 * a * x + v**2) - v) / a
-        t2 = -(np.sqrt(2 * a * x + v**2) + v) / a
+        t1 = (np.sqrt(2 * a * dx + v**2) - v) / a
+        t2 = -(np.sqrt(2 * a * dx + v**2) + v) / a
         t = np.zeros(t1.shape)
         m1 = t1 > 0
         m2 = t2 > 0
@@ -78,8 +78,8 @@ def calculate_time_ballistic(
         return t
     else:
         if isinstance(a, Iterable):
-            t1 = np.array([(np.sqrt(2 * ai * x + v**2) - v) / ai for ai in a])
-            t2 = -np.array([(np.sqrt(2 * ai * x + v**2) - v) / ai for ai in a])
+            t1 = np.array([(np.sqrt(2 * ai * dx + v**2) - v) / ai for ai in a])
+            t2 = -np.array([(np.sqrt(2 * ai * dx + v**2) - v) / ai for ai in a])
             t = np.zeros(t1.shape)
             m1 = t1 > 0
             m2 = t2 > 0
@@ -88,8 +88,8 @@ def calculate_time_ballistic(
             t[~(m1 | m2)] = np.nan
             return t
         else:
-            t1 = (np.sqrt(2 * a * x + v**2) - v) / a
-            t2 = -(np.sqrt(2 * a * x + v**2) + v) / a
+            t1 = (np.sqrt(2 * a * dx + v**2) - v) / a
+            t2 = -(np.sqrt(2 * a * dx + v**2) + v) / a
             t = np.zeros(t1.shape)
             m1 = t1 > 0
             m2 = t2 > 0
@@ -105,12 +105,17 @@ def propagate_ballistic_trajectories(
     velocities: Velocities,
     objects: List,
     z_stop: float,
-    gravity: Gravity = Gravity(0.0, -9.81, 0.0),
+    force: Force = Force(0.0, -9.81, 0.0),
     z_save: Optional[Union[List[float], npt.NDArray[np.float64]]] = None,
     save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[
-    npt.NDArray[np.bool_], npt.NDArray[np.float64], Coordinates, Velocities, int
+    npt.NDArray[np.bool_],
+    npt.NDArray[np.float64],
+    Coordinates,
+    Velocities,
+    int,
+    List[Tuple[Coordinates, Velocities]],
 ]:
     """
     Propagate balistic trajectories. Stores the initial and final timestamps,
@@ -146,29 +151,27 @@ def propagate_ballistic_trajectories(
         dz = obj.z_stop - accepted_coords.z
         # velocity
         vz = accepted_velocities.vz
-        # gravity
-        gz = gravity.gz
-        t = calculate_time_ballistic(dz, vz, gz)
+        # forward acceleration
+        fz = force.fz
+        t = calculate_time_ballistic(dz, vz, fz)
         if (
             calculate_time_ballistic(
-                z_stop - accepted_coords.z[0], accepted_velocities.vz[0], gz
+                z_stop - accepted_coords.z[0], accepted_velocities.vz[0], fz
             )
             <= t[0]
         ):
             continue
 
-        x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, gravity)
-        acceptance = obj.get_acceptance(
-            accepted_coords, x, accepted_velocities, gravity
-        )
+        x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, force)
+        acceptance = obj.get_acceptance(accepted_coords, x, accepted_velocities, force)
         acceptance &= ~np.isnan(t)
 
         if save_collisions:
             if type(obj).__name__ == "PlateElectrodes":
                 collisions.append(
-                    obj.get_collisions(
-                        accepted_coords, x, accepted_velocities, gravity
-                    )[1:]
+                    obj.get_collisions(accepted_coords, x, accepted_velocities, force)[
+                        1:
+                    ]
                 )
             else:
                 collisions.append(
@@ -190,8 +193,8 @@ def propagate_ballistic_trajectories(
             coords = accepted_coords.get_last()
             vels = accepted_velocities.get_last()
             dz = z - coords.z
-            dt = calculate_time_ballistic(dz, vels.vz, gravity.gz)
-            x, v = propagate_ballistic(dt, coords, vels, gravity)
+            dt = calculate_time_ballistic(dz, vels.vz, force.fz)
+            x, v = propagate_ballistic(dt, coords, vels, force)
             if idz != 0:
                 t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])
             else:
@@ -203,7 +206,7 @@ def propagate_ballistic_trajectories(
     coords = accepted_coords.get_last()
     vels = accepted_velocities.get_last()
     dt = (z_stop - coords.z) / vels.vz
-    x, v = propagate_ballistic(dt, coords, vels, gravity)
+    x, v = propagate_ballistic(dt, coords, vels, force)
 
     if z_save is not None and len(z_save) > 0:
         t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])
