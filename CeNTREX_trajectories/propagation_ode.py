@@ -76,7 +76,7 @@ def ode_fun(
                                                             ODE
     """
     x, y, z, vx, vy, vz = d
-    fx, fy, fz = force_fn(x, y, z)
+    fx, fy, fz = force_fn(t, x, y, z)
     ax = fx / mass
     ay = fy / mass
     az = fz / mass

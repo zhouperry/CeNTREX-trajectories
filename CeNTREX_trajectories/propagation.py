@@ -107,7 +107,7 @@ def propagate_trajectories(
                 velocities_start,
                 section.objects,
                 section.stop,
-                force,
+                force + section.force,
                 z_save=z_save_section,
                 save_collisions=section.save_collisions,
                 options=options,
@@ -144,14 +144,25 @@ def propagate_trajectories(
             timestamps_tracked = timestamps_tracked[:, -1]
             coordinates_tracked = coordinates_tracked.get_last()
             velocities_tracked = velocities_tracked.get_last()
+            if isinstance(section, ODESection):
+                force_fun = section.force
+                force_cst = force
+            else:
+
+                def force_fun(
+                    t: float, x: float, y: float, z: float
+                ) -> Tuple[float, float, float]:
+                    return (0.0, 0.0, 0.0)
+
+                force_cst = force + section.force
             solutions = propagate_ODE_trajectories(
-                t_start,
-                coords_start,
-                velocities_start,
-                section.stop,
-                particle.mass,
-                section.force,
-                force_cst=force,
+                t_start=t_start,
+                origin=coords_start,
+                velocities=velocities_start,
+                z_stop=section.stop,
+                mass=particle.mass,
+                force_fun=force_fun,
+                force_cst=force_cst,
                 options=options,
             )
             coords = []

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import Any, List, Union
+from typing import AbstractSet, Any, Iterator, List, Optional, Tuple, Union, ValuesView
 
 import numpy as np
 import numpy.typing as npt
 from scipy.optimize import OptimizeResult
 
-__all__: List[str] = ["Force", "Force", "Velocities", "Coordinates", "Trajectories"]
+__all__: List[str] = ["Force", "Gravity", "Velocities", "Coordinates", "Trajectories"]
 
 
 @dataclass(frozen=True)
@@ -55,11 +55,13 @@ class Force:
     def __add__(self, other) -> Force:
         if isinstance(other, Force):
             return Force(self.fx + other.fx, self.fy + other.fy, self.fz + other.fz)
+        elif other is None:
+            return self
         else:
             raise TypeError(f"can only add Force (not {type(other)}) to Force")
 
 
-Force = Force
+Gravity = Force
 
 
 @dataclass
@@ -520,10 +522,10 @@ class Trajectories(MutableMapping):
     def __init__(self, *args, **kwargs):
         self._storage = dict(*args, **kwargs)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int) -> Trajectory:
         return self._storage[key]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Tuple[int, Trajectory]]:
         return iter(self._storage)
 
     def __len__(self):
@@ -532,12 +534,18 @@ class Trajectories(MutableMapping):
     def __repr__(self):
         return f"Trajectories(n={self.__len__()})"
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: int):
         del self._storage[key]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: int, value: Trajectory):
         assert isinstance(value, Trajectory)
         self._storage[key] = value
+
+    def values(self) -> ValuesView[Trajectory]:
+        return super().values()
+
+    def items(self) -> AbstractSet[Tuple[int, Trajectory]]:
+        return super().items()
 
     def delete_trajectories(
         self, indices: Union[List[int], npt.NDArray[np.int32]]
@@ -593,3 +601,38 @@ class Trajectories(MutableMapping):
             )
         else:
             self._storage[index].append_from_ode(sol, save_start=False)
+
+    def get_coordinates_velocities_at_position(
+        self,
+        *,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
+    ) -> Tuple[Coordinates, Velocities]:
+        if x is None and y is None and z is None:
+            raise ValueError("Supply an x, y or z coordinate")
+        else:
+            if x is not None:
+                indices = [np.where(traj.x == x)[0] for traj in self.values()]
+            elif y is not None:
+                indices = [np.where(traj.y == y)[0] for traj in self.values()]
+            elif z is not None:
+                indices = [np.where(traj.z == z)[0] for traj in self.values()]
+
+            x_list: List[float] = []
+            y_list: List[float] = []
+            z_list: List[float] = []
+            vx: List[float] = []
+            vy: List[float] = []
+            vz: List[float] = []
+            for idx, traj in zip(indices, self.values()):
+                x_list.append(traj.x[idx])
+                y_list.append(traj.y[idx])
+                z_list.append(traj.z[idx])
+                vx.append(traj.vx[idx])
+                vy.append(traj.vy[idx])
+                vz.append(traj.vz[idx])
+            return (
+                Coordinates(np.array(x_list), np.array(y_list), np.array(z_list)),
+                Velocities(np.array(vx), np.array(vy), np.array(vz)),
+            )

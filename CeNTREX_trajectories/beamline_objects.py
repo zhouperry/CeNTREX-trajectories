@@ -1,7 +1,7 @@
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -42,9 +42,9 @@ class Section:
         save_collisions (bool): save the coordinates and velocities of collisions in
                                 this section
         propagation_type (PropagationType): propagation type to use for integration
-        force (Optional([Union[Callable, Force]]): force to use, either a function that
-                                                calculates the force based on t,x,y,z
-                                                or a constant force
+        force (Optional(Force): force to use, a constant force in addition to the force
+                                that acts on the entire beamline,e.g. gravity. Could be
+                                used for constant deflection from an electric field.
 
     """
 
@@ -53,8 +53,8 @@ class Section:
     start: float
     stop: float
     save_collisions: bool
-    propagation_type: PropagationType
-    force: Optional[Union[Callable, Force]] = None
+    propagation_type: PropagationType = PropagationType.ballistic
+    force: Optional[Force] = None
 
     def __post_init__(self):
         """
@@ -92,7 +92,14 @@ class ODESection:
                 self.start, self.stop
             ), f"{o.name} not inside {self.name}"
 
-    def force(self, x, y, z) -> Union[List[float], List[npt.NDArray[np.float64]]]:
+    def force(
+        self, t, x, y, z
+    ) -> Union[
+        Tuple[float, float, float],
+        Tuple[
+            npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
+        ],
+    ]:
         raise NotImplementedError
 
 
@@ -175,14 +182,21 @@ class ElectrostaticQuadrupoleLens(ODESection):
 
     def force(
         self,
+        t: float,
         x: Union[npt.NDArray[np.float64], float],
         y: Union[npt.NDArray[np.float64], float],
         z: Union[npt.NDArray[np.float64], float],
-    ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
+    ) -> Union[
+        Tuple[
+            npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
+        ],
+        Tuple[float, float, float],
+    ]:
         """
         Calculate the force at x,y,z
 
         Args:
+            t (float): time [s]
             x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
             y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
             z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
@@ -194,7 +208,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         dx = x / r
         dy = y / r
         stark = -self._poly_stark_derivative_radial(r)
-        return [stark * dx, stark * dy, 0]
+        return (stark * dx, stark * dy, 0)
 
     def stark_potential_derivative(
         self,
@@ -341,16 +355,23 @@ class MagnetostaticHexapoleLens(ODESection):
 
     def force(
         self,
+        t: float,
         x: Union[npt.NDArray[np.float64], float],
         y: Union[npt.NDArray[np.float64], float],
         z: Union[npt.NDArray[np.float64], float],
-    ) -> Union[List[npt.NDArray[np.float64]], List[float]]:
+    ) -> Union[
+        Tuple[
+            npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
+        ],
+        Tuple[float, float, float],
+    ]:
         """
         Calculate the force at x,y,z
 
         The magnetic force on the dipole is given by F = ∇(μ⋅B).
 
         Args:
+            t (float): time [s]
             x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
             y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
             z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
@@ -364,7 +385,7 @@ class MagnetostaticHexapoleLens(ODESection):
         fx = -2 * x * self.Bar / self.Rin**2 * self.particle.magnetic_moment
         fy = -2 * y * self.Bar / self.Rin**2 * self.particle.magnetic_moment
         fz = fx * 0.0
-        return [fx, fy, fz]
+        return (fx, fy, fz)
 
     def _magnetic_field_aperture_radius(self) -> None:
         """

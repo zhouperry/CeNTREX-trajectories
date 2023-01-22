@@ -1,35 +1,36 @@
 import os
 
+import asciichartpy as acp
 import matplotlib.pyplot as plt
 import numpy as np
-from centrex_trajectories import (
-    CircularAperture,
-    Coordinates,
-    ElectrostaticQuadrupoleLens,
-    Gravity,
-    PropagationType,
-    RectangularAperture,
-    Section,
-    TlF,
-    Velocities,
-    propagate_trajectories,
-    PropagationOptions,
-)
+from rich.console import Group
+from rich.live import Live
+from rich.panel import Panel
 from rich.progress import (
+    BarColumn,
     Progress,
+    ProgressColumn,
+    SpinnerColumn,
+    TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
-    SpinnerColumn,
-    BarColumn,
     TimeRemainingColumn,
-    TaskProgressColumn,
-    ProgressColumn,
 )
 
-import asciichartpy as acp
-from rich.panel import Panel
-from rich.live import Live
-from rich.console import Group
+from centrex_trajectories import (
+    Force,
+    PropagationOptions,
+    PropagationType,
+    propagate_trajectories,
+    random_generation,
+)
+from centrex_trajectories.beamline_objects import (
+    CircularAperture,
+    ElectrostaticQuadrupoleLens,
+    RectangularAperture,
+    Section,
+)
+from centrex_trajectories.particles import TlF
 
 
 def get_panel(data, title, height=10, format="{:8.5f}"):
@@ -49,7 +50,7 @@ class TaskSpeed(ProgressColumn):
 total_runs = 10
 n_trajectories = 4_000_000
 options = PropagationOptions(verbose=False)
-gravity = Gravity(0, -9.81, 0)
+gravity = Force(0, -9.81, 0)
 particle = TlF()
 # Ls = np.linspace(0.1, 0.7, 5)
 Ls = [0, 0.6]
@@ -112,20 +113,22 @@ if __name__ == "__main__":
     group = Group(panel, progress)
     data = [[]]
     throughput_list, particles_detected_list = [], []
-    with Live(group, refresh_per_second=1) as live:
+    with Live(group, refresh_per_second=30) as live:
         task_total = progress.add_task("[red]Repeating", total=total_runs, value=None)
         for repeat in range(total_runs):
             progress.update(task_total, advance=0, value=f"{repeat+1}")
             task_L = progress.add_task("[blue]Length scan", total=len(Ls), value=None)
-            origin = Coordinates(
-                np.random.randn(n_trajectories) * 1.5e-3,
-                np.random.randn(n_trajectories) * 1.5e-3,
-                np.zeros(n_trajectories),
+            origin = random_generation.generate_random_coordinates_normal_circle(
+                1.5e-3, n_trajectories
             )
-            velocities = Velocities(
-                np.random.randn(n_trajectories) * 39.4,
-                np.random.randn(n_trajectories) * 39.4,
-                np.random.randn(n_trajectories) * 16 + 184,
+            velocities = random_generation.generate_random_velocities_normal(
+                vx=0,
+                vy=0,
+                vz=184,
+                sigma_vx=39.4,
+                sigma_vy=39.4,
+                sigma_vz=16,
+                number=n_trajectories,
             )
             throughput = {}
             particles_detected = {}
@@ -178,7 +181,7 @@ if __name__ == "__main__":
                         origin,
                         velocities,
                         particle,
-                        gravity=gravity,
+                        force=gravity,
                         options=options,
                     )
 
