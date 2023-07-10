@@ -107,7 +107,7 @@ section_data, trajectories = propagate_trajectories(
     coordinates_init,
     velocities_init,
     particle,
-    gravity=gravity,
+    force=gravity,
     options=options,
 )
 
