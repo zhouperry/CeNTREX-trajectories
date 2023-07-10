@@ -1,6 +1,12 @@
 # CeNTREX-trajectories
 Code for simulating CeNTREX trajectories
 
+## Installation
+Clone repo and install with `pip` or directly install from GitHub with:  
+```
+pip install git+https://github.com/ograsdijk/CeNTREX-trajectories
+```
+
 ## Sections
 The beamline is split into sections specified with `Section`, which can be used as follows:
 ```Python
@@ -38,70 +44,71 @@ There is support for ballistic and ODE solver trajectories, which is specified o
 ```Python
 import numpy as np
 from centrex_trajectories import (
-    CircularAperture,
     Coordinates,
     Velocities,
-    Gravity,
+    Force,
     PropagationType,
-    Section,
-    TlF,
     propagate_trajectories,
     PropagationOptions,
 )
 
+from centrex_trajectories.beamline_objects import CircularAperture, Section
+from centrex_trajectories.particles import TlF
+
 in_to_m = 0.0254
 
 fourK = Section(
-    name = "4K shield",
-    objects = [CircularAperture(x=0, y=0, z=1.75 * in_to_m, r = 1/2 * in_to_m)],
-    start = 0,
-    stop = 2 * in_to_m,
-    save_collisions = False,
-    propagation_type = PropagationType.ballistic,
+    name="4K shield",
+    objects=[CircularAperture(x=0, y=0, z=1.75 * in_to_m, r=1 / 2 * in_to_m)],
+    start=0,
+    stop=2 * in_to_m,
+    save_collisions=False,
+    propagation_type=PropagationType.ballistic,
 )
 fourtyK = Section(
-    name = "40K shield",
-    objects = [
-        CircularAperture(x=0, y=0, z=fourK.stop + 1.25 * in_to_m, r = 1/2 * in_to_m)
+    name="40K shield",
+    objects=[
+        CircularAperture(x=0, y=0, z=fourK.stop + 1.25 * in_to_m, r=1 / 2 * in_to_m)
     ],
-    start = fourK.stop,
-    stop = fourK.stop + 1.5 * in_to_m,
-    save_collisions = False,
-    propagation_type = PropagationType.ballistic
+    start=fourK.stop,
+    stop=fourK.stop + 1.5 * in_to_m,
+    save_collisions=False,
+    propagation_type=PropagationType.ballistic,
 )
 bbexit = Section(
-    name = "Beamsource Exit",
-    objects = [CircularAperture(0, 0, fourtyK.stop + 2.5 * in_to_m, 2 * in_to_m)],
-    start = fourtyK.stop,
-    stop = fourtyK.stop + 3.25 * in_to_m,
-    save_collisions = False,
-    propagation_type = PropagationType.ballistic
+    name="Beamsource Exit",
+    objects=[CircularAperture(0, 0, fourtyK.stop + 2.5 * in_to_m, 2 * in_to_m)],
+    start=fourtyK.stop,
+    stop=fourtyK.stop + 3.25 * in_to_m,
+    save_collisions=False,
+    propagation_type=PropagationType.ballistic,
 )
 
 sections = [fourK, fourtyK, bbexit]
 
 n_trajectories = 100_000
 coordinates_init = Coordinates(
-    x = np.random.randn(n_trajectories) * 1.5e-3,
-    y = np.random.randn(n_trajectories) * 1.5e-3,
-    z = np.zeros(n_trajectories)
+    x=np.random.randn(n_trajectories) * 1.5e-3,
+    y=np.random.randn(n_trajectories) * 1.5e-3,
+    z=np.zeros(n_trajectories),
 )
 velocities_init = Velocities(
-    vx = np.random.randn(n_trajectories) * 39.4,
-    vy = np.random.randn(n_trajectories) * 39.4,
-    vz = np.random.randn(n_trajectories) * 16 + 184
+    vx=np.random.randn(n_trajectories) * 39.4,
+    vy=np.random.randn(n_trajectories) * 39.4,
+    vz=np.random.randn(n_trajectories) * 16 + 184,
 )
 
-options = PropagationOptions(n_cores = 6, verbose=False)
-gravity = Gravity(0, -9.81, 0)
+options = PropagationOptions(n_cores=6, verbose=False)
+gravity = Force(0, -9.81, 0)
 particle = TlF()
 
 section_data, trajectories = propagate_trajectories(
-    sections, 
-    coordinates_init, 
-    velocities_init, 
-    particle, 
-    gravity=gravity, 
-    options=options 
+    sections,
+    coordinates_init,
+    velocities_init,
+    particle,
+    gravity=gravity,
+    options=options,
 )
+
 ```
