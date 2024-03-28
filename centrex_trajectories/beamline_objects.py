@@ -699,18 +699,19 @@ class Bore:
     def check_in_bounds(self, start: float, stop: float) -> bool:
         return self.z >= start and self.z + self.length <= stop
 
-    def get_acceptance(self, coords: Coordinates) -> npt.NDArray[np.bool_]:
-        mask_z = (coords.z >= self.z) & (coords.z <= self.z + self.length)
-        mask_r = (
-            (coords.x - self.x) ** 2 + (coords.y - self.y) ** 2
-        ) > self.radius**2
-        accept_array = np.ones(coords.x.shape, dtype=np.bool_)
+    def get_acceptance(
+        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+    ) -> npt.NDArray[np.bool_]:
+        mask_z = (stop.z >= self.z) & (stop.z <= self.z + self.length)
+        mask_r = ((stop.x - self.x) ** 2 + (stop.y - self.y) ** 2) > self.radius**2
+        accept_array = np.ones(stop.x.shape, dtype=np.bool_)
         accept_array[mask_z & mask_r] = False
         return accept_array
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
-        r_squared = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+        r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
         # z_factor for checking if z coordinates are within electrodes
         z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
-        return r_squared - self.radius + z_factor
+
+        return (r - self.radius) + z_factor

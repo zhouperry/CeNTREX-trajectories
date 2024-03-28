@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -36,6 +36,23 @@ def z_stop_event_generator(z_stop: float) -> Callable:
     return event
 
 
+def collision_event_generator(
+    collision_events: Sequence[Callable],
+) -> Sequence[Callable]:
+    events = []
+    for collision_event in collision_events:
+
+        def event(
+            t: Union[float, npt.NDArray[np.float64]],
+            y: npt.NDArray[np.float64],
+        ) -> float:
+            return collision_event(y[0], y[1], y[2])
+
+        event.terminal = True  # type: ignore
+        events.append(event)
+    return events
+
+
 def solve_ode(*args) -> OptimizeResult:
     """
     Solve the trajectory propagation ODE for a single trajectory
@@ -43,14 +60,16 @@ def solve_ode(*args) -> OptimizeResult:
     Returns:
         OptimizeResult: solution of the trajectory ODE
     """
-    t, x, v, z_stop, mass, force, gravity = args
+    t, x, v, z_stop, mass, force, gravity, events = args
     t_span = [t, t + 2 * (z_stop - x.z) / v.vz]
-    event = z_stop_event_generator(z_stop)
+    z_stop_event = z_stop_event_generator(z_stop)
     p = [x.x, x.y, x.z, v.vx, v.vy, v.vz]
     _ode_fun = partial(
         ode_fun, **{"mass": mass, "force_fn": force, "force_cst": gravity}
     )
-    sol = solve_ivp(_ode_fun, t_span, p, events=[event], rtol=1e-7, atol=1e-7)
+    sol = solve_ivp(
+        _ode_fun, t_span, p, events=events + [z_stop_event], rtol=1e-7, atol=1e-7
+    )
     return sol
 
 
@@ -98,6 +117,7 @@ def propagate_ODE_trajectories(
     mass: float,
     force_fun: Callable,
     force_cst: Force = Force(0.0, -9.81, 0.0),
+    events: Sequence[Callable] = [],
     z_save: Optional[
         Union[List[Union[float, int]], npt.NDArray[Union[np.float64, np.int32]]]
     ] = None,
@@ -128,8 +148,10 @@ def propagate_ODE_trajectories(
     Returns:
         _type_: _description_
     """
+    events = collision_event_generator(events)
+
     solutions = Parallel(n_jobs=options.n_cores, verbose=int(options.verbose))(
-        delayed(solve_ode)(t, x, v, z_stop, mass, force_fun, force_cst)
+        delayed(solve_ode)(t, x, v, z_stop, mass, force_fun, force_cst, events)
         for t, x, v in zip(t_start, origin, velocities)
     )
     return solutions

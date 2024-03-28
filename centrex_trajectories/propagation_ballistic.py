@@ -58,7 +58,7 @@ def calculate_time_ballistic(
     Returns:
         npt.NDArray[np.float64]: time to travel distance x
     """
-    if np.alltrue(a == 0):
+    if np.all(a == 0):
         t = dx / v
         if isinstance(t, np.ndarray):
             t[t < 0] = np.nan
@@ -66,7 +66,7 @@ def calculate_time_ballistic(
             t = np.nan if t < 0 else t
         return t
 
-    elif np.alltrue(a != 0):
+    elif np.all(a != 0):
         t1 = (np.sqrt(2 * a * dx + v**2) - v) / a
         t2 = -(np.sqrt(2 * a * dx + v**2) + v) / a
         t = np.zeros(t1.shape)
@@ -154,20 +154,20 @@ def propagate_ballistic_trajectories(
         # forward acceleration
         fz = force.fz
         t = calculate_time_ballistic(dz, vz, fz)
-        if (
-            calculate_time_ballistic(
-                z_stop - accepted_coords.z[0], accepted_velocities.vz[0], fz
-            )
-            <= t[0]
-        ):
-            continue
+        # if (
+        #     calculate_time_ballistic(
+        #         z_stop - accepted_coords.z[0], accepted_velocities.vz[0], fz
+        #     )
+        #     <= t[0]
+        # ):
+        #     continue
 
         x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, force)
         acceptance = obj.get_acceptance(accepted_coords, x, accepted_velocities, force)
         acceptance &= ~np.isnan(t)
 
         if save_collisions:
-            if type(obj).__name__ == "PlateElectrodes":
+            if hasattr(obj, "get_collisions"):
                 collisions.append(
                     obj.get_collisions(accepted_coords, x, accepted_velocities, force)[
                         1:
