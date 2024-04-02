@@ -8,6 +8,7 @@ from . import (
     propagation_options,
     random_generation,
     visualization,
+    utils
 )
 from .data_structures import Coordinates, Force, Gravity, Velocities
 from .propagation import PropagationOptions, PropagationType, propagate_trajectories
@@ -30,3 +31,4 @@ __all__ += propagation_ode.__all__.copy()
 __all__ += propagation_options.__all__.copy()
 __all__ += random_generation.__all__.copy()
 __all__ += visualization.__all__.copy()
+__all__ += utils.__all__.copy()

@@ -25,8 +25,9 @@ __all__ = [
 path = Path(__file__).resolve().parent
 with open(path / "saved_data" / "stark_poly.pkl", "rb") as f:
     stark_poly = pickle.load(f)
-    stark_potential = np.poly1d(stark_poly)
-    stark_potential_derivative = np.polyder(stark_potential)
+    stark_potential_default = np.polynomial.Polynomial(stark_poly)
+    stark_potential_default_derivative = stark_potential_default.deriv()
+
 
 
 @dataclass
@@ -117,6 +118,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         V: float,
         R: float,
         save_collisions: bool = False,
+        stark_potential: None | npt.NDArray[np.float64] = None
     ) -> None:
         """
         Electrostatic Quadrupole Lens Section
@@ -135,31 +137,36 @@ class ElectrostaticQuadrupoleLens(ODESection):
         super().__init__(name, objects, start, stop, save_collisions)
         self.V = V
         self.R = R
+        self._stark_potential = None
         self._check_objects()
-        self._initialize_potentials()
+        self._initialize_potentials(stark_potential)
 
-    def _initialize_potentials(self):
+    def _initialize_potentials(self, stark_potential: None | npt.NDArray[np.float64] = None):
         """
         Generate the radial derivative of the Stark potential for the force calculation
         """
-        # fit a polynomial to the stark potential as a fucntion of r
+        if not stark_potential:
+            self._stark_potential = stark_potential_default
+            # ensure derivative at 0 radius/field is zero
+            degrees = np.arange(12)
+            degrees = degrees[degrees != 1]
+        else:
+            self._stark_potential = np.polynomial.Polynomial(stark_potential)
+            # ensure derivative at 0 radius/field is zero
+            degrees = np.arange(stark_potential.size + 1)
+            degrees = degrees[degrees != 1]
+
+        # fit a polynomial to the stark potential as a function of r
         r = np.linspace(0, 1.5 * self.R, 201)
-        offset = self.stark_potential(0, 0, 0)
-        self._poly_stark_radial = np.polyfit(
-            r, self.stark_potential(r, 0, 0) - offset, 11
+
+        self._poly_stark_radial = np.polynomial.Polynomial.fit(
+            r,
+            self.stark_potential(r, 0, 0),
+            deg=degrees,
+            domain = []
         )
         # take the derivative
-        self._poly_stark_derivative_radial = np.polyder(
-            np.poly1d(self._poly_stark_radial)
-        )
-        # force intercept to go through zero for the force by fitting a polynomial
-        # that intercepts zero through the derivative as a function of r
-        R_ = np.vstack((r**6, r**5, r**4, r**3, r**2, r)).T
-        y = self._poly_stark_derivative_radial(r)
-        p = np.linalg.lstsq(R_, y, rcond=None)[0]
-        p = np.append(p, [0])
-        # creating the function to evaluate the derivative of the stark potential in r
-        self._poly_stark_derivative_radial = np.poly1d(p)
+        self._poly_stark_derivative_radial = self._poly_stark_radial.deriv()
 
     def electric_field(
         self,
@@ -247,7 +254,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
             Union[NDArray[np.float64], float]: stark potential
         """
         E = self.electric_field(x, y, z)
-        return stark_potential(E)
+        return self._stark_potential(E)
 
     def stark_potential_E(
         self, E: Union[npt.NDArray[np.float64], float]
@@ -261,7 +268,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[np.ndarray, float]: stark potential
         """
-        return stark_potential(E)
+        return self._stark_potential(E)
 
 
 class MagnetostaticHexapoleLens(ODESection):
