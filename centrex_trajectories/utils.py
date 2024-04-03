@@ -1,16 +1,19 @@
+from typing import List
+
 import numpy as np
 import numpy.typing as npt
-from typing import List
 
 __all__: List[str] = []
 
+
 def fit_stark_potential(
-        electric_field: npt.NDArray[np.float64],
-        stark_potential: npt.NDArray[np.float64],
-        deg: int
+    electric_field: npt.NDArray[np.float64],
+    stark_potential: npt.NDArray[np.float64],
+    deg: int,
 ) -> npt.NDArray[np.float64]:
     """
-    Fit a Stark Potential with a polynomial, ensuring the derivative at zero field is zero
+    Fit a Stark Potential with a polynomial, ensuring the derivative at zero field is
+    zero, e.g. the linear term of the potential is zero.
 
     Args:
         electric_field (npt.NDArray[np.float64]): electric field
@@ -20,7 +23,9 @@ def fit_stark_potential(
     Returns:
         npt.NDArray[np.float64]: polynomial coefficients
     """
-    degrees = np.arange(deg+1)
+    degrees = np.arange(deg + 1)
     degrees = degrees[degrees != 1]
-    fit = np.polynomial.Polynomial.fit(x=electric_field, y=stark_potential, deg=degrees,domain=[])
+    fit = np.polynomial.Polynomial.fit(
+        x=electric_field, y=stark_potential, deg=degrees, domain=[]
+    )
     return fit.coef

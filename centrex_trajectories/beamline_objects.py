@@ -24,10 +24,9 @@ __all__ = [
 
 path = Path(__file__).resolve().parent
 with open(path / "saved_data" / "stark_poly.pkl", "rb") as f:
-    stark_poly = pickle.load(f)
+    stark_poly: npt.NDArray[np.float64] = pickle.load(f)
     stark_potential_default = np.polynomial.Polynomial(stark_poly)
     stark_potential_default_derivative = stark_potential_default.deriv()
-
 
 
 @dataclass
@@ -118,7 +117,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         V: float,
         R: float,
         save_collisions: bool = False,
-        stark_potential: None | npt.NDArray[np.float64] = None
+        stark_potential: None | npt.NDArray[np.float64] = None,
     ) -> None:
         """
         Electrostatic Quadrupole Lens Section
@@ -133,40 +132,29 @@ class ElectrostaticQuadrupoleLens(ODESection):
             save_collisions (Optional[bool], optional): Save the coordinates and
                                                     velocities of collisions in this
                                                     section. Defaults to False.
+            stark_potential (Optional[np.ndarray]): polynomial coefficients of the stark
+                                                    potential as a function of electric
+                                                    field
         """
         super().__init__(name, objects, start, stop, save_collisions)
         self.V = V
         self.R = R
-        self._stark_potential = None
+        self._stark_potential = np.array([0.0, 0.0, 0.0])
         self._check_objects()
         self._initialize_potentials(stark_potential)
 
-    def _initialize_potentials(self, stark_potential: None | npt.NDArray[np.float64] = None):
+    def _initialize_potentials(
+        self, stark_potential: None | npt.NDArray[np.float64] = None
+    ) -> None:
         """
         Generate the radial derivative of the Stark potential for the force calculation
         """
-        if not stark_potential:
+        if stark_potential is None:
             self._stark_potential = stark_potential_default
-            # ensure derivative at 0 radius/field is zero
-            degrees = np.arange(12)
-            degrees = degrees[degrees != 1]
         else:
             self._stark_potential = np.polynomial.Polynomial(stark_potential)
-            # ensure derivative at 0 radius/field is zero
-            degrees = np.arange(stark_potential.size + 1)
-            degrees = degrees[degrees != 1]
 
-        # fit a polynomial to the stark potential as a function of r
-        r = np.linspace(0, 1.5 * self.R, 201)
-
-        self._poly_stark_radial = np.polynomial.Polynomial.fit(
-            r,
-            self.stark_potential(r, 0, 0),
-            deg=degrees,
-            domain = []
-        )
-        # take the derivative
-        self._poly_stark_derivative_radial = self._poly_stark_radial.deriv()
+        self._stark_potential_derivative = self._stark_potential.deriv()
 
     def electric_field(
         self,
@@ -186,6 +174,25 @@ class ElectrostaticQuadrupoleLens(ODESection):
             Union[NDArray[np.float64], float]: electric field at x,y,z in V/m
         """
         return 2 * self.V * np.sqrt(x**2 + y**2) / (self.R) ** 2
+
+    def electric_field_derivative_r(
+        self,
+        x: Union[npt.NDArray[np.float64], float],
+        y: Union[npt.NDArray[np.float64], float],
+        z: Union[npt.NDArray[np.float64], float],
+    ) -> Union[npt.NDArray[np.float64], float]:
+        """
+        Derivative of the electric field in r: dE/dr (r = sqrt(x^2+y^2))
+
+        Args:
+            x (Union[npt.NDArray[np.float64], float]): x coordinate(s) [m]
+            y (Union[npt.NDArray[np.float64], float]): y coordinate(s) [m]
+            z (Union[npt.NDArray[np.float64], float]): z coordinates(s) [m]
+
+        Returns:
+            Union[npt.NDArray[np.float64], float]: derivative of electric field in r V/m^2
+        """
+        return 2 * self.V / self.R**2
 
     def force(
         self,
@@ -214,7 +221,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
         r = np.sqrt(x**2 + y**2)
         dx = x / r
         dy = y / r
-        stark = -self._poly_stark_derivative_radial(r)
+        stark = -self.stark_potential_derivative(
+            x, y, z
+        ) * self.electric_field_derivative_r(x, y, z)
         return (stark * dx, stark * dy, 0)
 
     def stark_potential_derivative(
@@ -224,7 +233,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         z: Union[npt.NDArray[np.float64], float],
     ) -> Union[npt.NDArray[np.float64], float]:
         """
-        Calculate the radial derivative of the stark potential at x,y,z
+        Calculate the derivative (dStark/dE) of the stark potential at x,y,z
 
         Args:
             x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
@@ -232,9 +241,10 @@ class ElectrostaticQuadrupoleLens(ODESection):
             z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
 
         Returns:
-            Union[np.ndarray, float]: radial derivative of stark potential
+            Union[np.ndarray, float]: derivative of stark potential dV/dE
         """
-        return self._poly_stark_derivative_radial(np.sqrt(x**2 + y**2))
+        E = self.electric_field(x, y, z)
+        return self._stark_potential_derivative(E)
 
     def stark_potential(
         self,
@@ -253,22 +263,37 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[NDArray[np.float64], float]: stark potential
         """
-        E = self.electric_field(x, y, z)
-        return self._stark_potential(E)
+        electric_field = self.electric_field(x, y, z)
+        return self._stark_potential(electric_field)
 
     def stark_potential_E(
-        self, E: Union[npt.NDArray[np.float64], float]
+        self, electric_field: Union[npt.NDArray[np.float64], float]
     ) -> Union[npt.NDArray[np.float64], float]:
         """
         Calculate the stark potential as a function of electric field in V/m
 
         Args:
-            E (Union[np.ndarray, float]): electric field in V/m
+            electric_field (Union[np.ndarray, float]): electric field in V/m
 
         Returns:
             Union[np.ndarray, float]: stark potential
         """
-        return self._stark_potential(E)
+        return self._stark_potential(electric_field)
+
+    def stark_potential_E_derivative(
+        self,
+        electric_field: Union[npt.NDArray[np.float64], float],
+    ) -> Union[npt.NDArray[np.float64], float]:
+        """
+        Calculate the derivative (dStark/dE) of the stark potential as a function of E
+
+        Args:
+            electric_field (Union[np.ndarray, float]): electric field in V/m
+
+        Returns:
+            Union[np.ndarray, float]: stark potential derivative dV/dE
+        """
+        return self._stark_potential_derivative(electric_field)
 
 
 class MagnetostaticHexapoleLens(ODESection):
