@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import AbstractSet, Any, Iterator, List, Optional, Tuple, Union, ValuesView
+from typing import Any, ItemsView, Iterator, List, Optional, Tuple, Union, ValuesView
 
 import numpy as np
 import numpy.typing as npt
@@ -118,7 +118,7 @@ class Velocities:
         Returns:
             Union[Velocity, Velocities]: Velocity or Velocities corresponding to index i
         """
-        if len(self.vx.shape) > 1:
+        if self.vx.ndim > 1:
             return Velocities(self.vx[i, :], self.vy[i, :], self.vz[i, :])
         else:
             return Velocity(self.vx[i], self.vy[i], self.vz[i])
@@ -131,7 +131,7 @@ class Velocities:
         return self
 
     def __next__(self):
-        if len(self.vx.shape) > 1:
+        if self.vx.ndim > 1:
             _i = self._i
             if _i < len(self.vx):
                 c = Velocities(self.vx[_i, :], self.vy[_i, :], self.vz[_i, :])
@@ -148,7 +148,7 @@ class Velocities:
             else:
                 raise StopIteration
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         if not isinstance(other, Velocities):
             return False
         elif (
@@ -239,14 +239,14 @@ class Coordinates:
     Coordinates
 
     Attributes:
-        x (NDArray[np.float64]): coordinates in x [m]
-        y (NDArray[np.float64]): coordinates in y [m]
-        z (NDArray[np.float64]): coordinates in z [m]
+        x (NDArray[np.float_]): coordinates in x [m]
+        y (NDArray[np.float_]): coordinates in y [m]
+        z (NDArray[np.float_]): coordinates in z [m]
     """
 
-    x: npt.NDArray[np.float64]
-    y: npt.NDArray[np.float64]
-    z: npt.NDArray[np.float64]
+    x: npt.NDArray[np.float_]
+    y: npt.NDArray[np.float_]
+    z: npt.NDArray[np.float_]
 
     def get_masked(self, mask: npt.NDArray[np.bool_]) -> Coordinates:
         """
@@ -272,7 +272,7 @@ class Coordinates:
             Union[Coordinate, Coordinates]: Coordinate or Coordinates corresponding to
                                             index i
         """
-        if len(self.x.shape) > 1:
+        if self.x.ndim > 1:
             return Coordinates(self.x[i, :], self.y[i, :], self.z[i, :])
         else:
             return Coordinate(self.x[i], self.y[i], self.z[i])
@@ -285,7 +285,7 @@ class Coordinates:
         return self
 
     def __next__(self):
-        if len(self.x.shape) > 1:
+        if self.x.ndim > 1:
             _i = self._i
             if _i < len(self.z):
                 c = Coordinates(self.x[_i, :], self.y[_i, :], self.z[_i, :])
@@ -302,7 +302,7 @@ class Coordinates:
             else:
                 raise StopIteration
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         if not isinstance(other, Coordinates):
             return False
         elif (
@@ -340,7 +340,7 @@ class Coordinates:
         self,
         sol: OptimizeResult,
         save_start: bool = True,
-        x_indices: npt.NDArray[np.int32] = np.array([0, 1, 2]),
+        x_indices: npt.NDArray[np.int_] = np.array([0, 1, 2]),
     ) -> None:
         """
         Append to coordinates from an ODE solution
@@ -377,19 +377,19 @@ class Trajectory:
     Trajectory holds the timestamps, coordinates and velocities for a single particle
 
     Attributes:
-        t (ndarray[float]) timestamps [s]
+        t (ndarray[float_]) timestamps [s]
         coordinates (Coordinates): coordinates
         velocities (Velocities): velocities
-        x (ndarray[float]): coordinates in x [m]
-        y (ndarray[float]): coordinates in y [m]
-        z (ndarray[float]): coordinates in z [m]
-        vx (ndarray[float]): velocities in x [m/s]
-        vy (ndarray[float]): velocities in y [m/s]
-        vz (ndarray[float]): velocities in z [m/s]
+        x (ndarray[float_]): coordinates in x [m]
+        y (ndarray[float_]): coordinates in y [m]
+        z (ndarray[float_]): coordinates in z [m]
+        vx (ndarray[float_]): velocities in x [m/s]
+        vy (ndarray[float_]): velocities in y [m/s]
+        vz (ndarray[float_]): velocities in z [m/s]
         index (int): index of particle, from initial distribution
     """
 
-    t: npt.NDArray[np.float64]
+    t: npt.NDArray[np.float_]
     coordinates: Coordinates
     velocities: Velocities
     index: int
@@ -410,68 +410,68 @@ class Trajectory:
         return len(self.coordinates)
 
     @property
-    def x(self) -> npt.NDArray[np.float64]:
+    def x(self) -> npt.NDArray[np.float_]:
         """
         x coordinates [m]
 
         Returns:
-            NDArray[np.float64]: x coordinates [m]
+            NDArray[np.float_]: x coordinates [m]
         """
         return self.coordinates.x
 
     @property
-    def y(self) -> npt.NDArray[np.float64]:
+    def y(self) -> npt.NDArray[np.float_]:
         """
         y coordinates [m]
 
         Returns:
-            NDArray[np.float64]: y coordinates [m]
+            NDArray[np.float_]: y coordinates [m]
         """
         return self.coordinates.y
 
     @property
-    def z(self) -> npt.NDArray[np.float64]:
+    def z(self) -> npt.NDArray[np.float_]:
         """
         z coordinates [z]
 
         Returns:
-            NDArray[np.float64]: z coordinates [m]
+            NDArray[np.float_]: z coordinates [m]
         """
         return self.coordinates.z
 
     @property
-    def vx(self) -> npt.NDArray[np.float64]:
+    def vx(self) -> npt.NDArray[np.float_]:
         """
         x velocities [m/s]
 
         Returns:
-            NDArray[np.float64]: x velocities [m/s]
+            NDArray[np.float_]: x velocities [m/s]
         """
         return self.velocities.vx
 
     @property
-    def vy(self) -> npt.NDArray[np.float64]:
+    def vy(self) -> npt.NDArray[np.float_]:
         """
         y velocities [m/s]
 
         Returns:
-            NDArray[np.float64]: y velocities [m/s]
+            NDArray[np.float_]: y velocities [m/s]
         """
         return self.velocities.vy
 
     @property
-    def vz(self) -> npt.NDArray[np.float64]:
+    def vz(self) -> npt.NDArray[np.float_]:
         """
         z velocities [m/s]
 
         Returns:
-            NDArray[np.float64]: z velocities [m/s]
+            NDArray[np.float_]: z velocities [m/s]
         """
         return self.velocities.vz
 
     def append(
         self,
-        t: npt.NDArray[np.float64],
+        t: npt.NDArray[np.float_],
         coordinates: Coordinates,
         velocities: Velocities,
     ) -> None:
@@ -479,7 +479,7 @@ class Trajectory:
         append timestamps, coordinates and velocities to the trajectory
 
         Args:
-            t (NDArray[np.float64]): timestamps
+            t (NDArray[np.float_]): timestamps
             coordinates (Coordinates): coordinates
             velocities (Velocities): velocities
         """
@@ -544,7 +544,7 @@ class Trajectories(MutableMapping):
     def values(self) -> ValuesView[Trajectory]:
         return super().values()
 
-    def items(self) -> AbstractSet[Tuple[int, Trajectory]]:
+    def items(self) -> ItemsView[int, Trajectory]:
         return super().items()
 
     def delete_trajectories(
@@ -562,7 +562,7 @@ class Trajectories(MutableMapping):
     def add_data(
         self,
         index: int,
-        t: npt.NDArray[np.float64],
+        t: npt.NDArray[np.float_],
         coordinates: Coordinates,
         velocities: Velocities,
     ) -> None:
@@ -571,7 +571,7 @@ class Trajectories(MutableMapping):
 
         Args:
             index (int): index
-            t (NDArray[np.float64]): timestamps [s]
+            t (NDArray[np.float_]): timestamps [s]
             coordinates (Coordinates): coordinates
             velocities (Velocities): velocities
         """
@@ -613,11 +613,17 @@ class Trajectories(MutableMapping):
             raise ValueError("Supply an x, y or z coordinate")
         else:
             if x is not None:
-                indices = [np.where(traj.x == x)[0] for traj in self.values()]
+                indices = [
+                    np.where(np.isclose(traj.x, x))[0][0] for traj in self.values()
+                ]
             elif y is not None:
-                indices = [np.where(traj.y == y)[0] for traj in self.values()]
+                indices = [
+                    np.where(np.isclose(traj.y, y))[0][0] for traj in self.values()
+                ]
             elif z is not None:
-                indices = [np.where(traj.z == z)[0] for traj in self.values()]
+                indices = [
+                    np.where(np.isclose(traj.z, z))[0][0] for traj in self.values()
+                ]
 
             x_list: List[float] = []
             y_list: List[float] = []

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, List, Optional, Sequence, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -13,7 +13,9 @@ from .propagation_options import PropagationOptions
 __all__: List[str] = []
 
 
-def z_stop_event_generator(z_stop: float) -> Callable:
+def z_stop_event_generator(
+    z_stop: float,
+) -> Callable[[float, npt.NDArray[np.float_]], float]:
     """
     Generate a terminal event function for solve_ivp that returns zero when z equals
     z_stop
@@ -26,8 +28,8 @@ def z_stop_event_generator(z_stop: float) -> Callable:
     """
 
     def event(
-        t: Union[float, npt.NDArray[np.float64]],
-        y: npt.NDArray[np.float64],
+        t: float,
+        y: npt.NDArray[np.float_],
     ) -> float:
         return y[2] - z_stop
 
@@ -37,14 +39,14 @@ def z_stop_event_generator(z_stop: float) -> Callable:
 
 
 def collision_event_generator(
-    collision_events: Sequence[Callable],
-) -> Sequence[Callable]:
+    collision_events: Sequence[Callable[[float, float, float], float]],
+) -> Sequence[Callable[[float, npt.NDArray[np.float_]], float]]:
     events = []
     for collision_event in collision_events:
 
         def event(
-            t: Union[float, npt.NDArray[np.float64]],
-            y: npt.NDArray[np.float64],
+            t: float,
+            y: npt.NDArray[np.float_],
         ) -> float:
             return collision_event(y[0], y[1], y[2])
 
@@ -74,12 +76,12 @@ def solve_ode(*args) -> OptimizeResult:
 
 
 def ode_fun(
-    t: Union[float, npt.NDArray[np.float64]],
+    t: float,
     d: List[float],
     mass: float,
-    force_fn: Callable,
+    force_fn: Callable[[float, float, float, float], Tuple[float, float, float]],
     force_cst: Force,
-) -> Union[List[npt.NDArray[np.float64]], List[float]]:
+) -> Tuple[float, float, float, float, float, float]:
     """
     General function describing the RHS of trajectory propagation
 
@@ -99,27 +101,27 @@ def ode_fun(
     ax = fx / mass
     ay = fy / mass
     az = fz / mass
-    return [
+    return (
         vx,
         vy,
         vz,
         ax + force_cst.fx,
         ay + force_cst.fy,
         az + force_cst.fz,
-    ]
+    )
 
 
 def propagate_ODE_trajectories(
-    t_start: npt.NDArray[np.float64],
+    t_start: npt.NDArray[np.float_],
     origin: Coordinates,
     velocities: Velocities,
     z_stop: float,
     mass: float,
-    force_fun: Callable,
+    force_fun: Callable[[float, float, float, float], Tuple[float, float, float]],
     force_cst: Force = Force(0.0, -9.81, 0.0),
-    events: Sequence[Callable] = [],
+    events: Sequence[Callable[[float, float, float], float]] = [],
     z_save: Optional[
-        Union[List[Union[float, int]], npt.NDArray[Union[np.float64, np.int32]]]
+        Union[List[Union[float, int]], npt.NDArray[Union[np.float_, np.int_]]]
     ] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> List[OptimizeResult]:
@@ -148,10 +150,12 @@ def propagate_ODE_trajectories(
     Returns:
         _type_: _description_
     """
-    events = collision_event_generator(events)
+    collision_events = collision_event_generator(events)
 
     solutions = Parallel(n_jobs=options.n_cores, verbose=int(options.verbose))(
-        delayed(solve_ode)(t, x, v, z_stop, mass, force_fun, force_cst, events)
+        delayed(solve_ode)(
+            t, x, v, z_stop, mass, force_fun, force_cst, collision_events
+        )
         for t, x, v in zip(t_start, origin, velocities)
     )
     return solutions
