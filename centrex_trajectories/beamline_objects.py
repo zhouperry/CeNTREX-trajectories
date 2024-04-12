@@ -44,6 +44,8 @@ class Section:
         stop (float): end of section in z [m]
         save_collisions (bool): save the coordinates and velocities of collisions in
                                 this section
+        save_collision_trajectories (bool): save the trajectories of collisions in this section
+        
         propagation_type (PropagationType): propagation type to use for integration
         force (Optional(Force): force to use, a constant force in addition to the force
                                 that acts on the entire beamline,e.g. gravity. Could be
@@ -56,6 +58,7 @@ class Section:
     start: float
     stop: float
     save_collisions: bool
+    save_collision_trajectories: bool
     propagation_type: PropagationType = PropagationType.ballistic
     force: Optional[Force] = None
 
@@ -79,13 +82,14 @@ class ODESection:
         start: float,
         stop: float,
         save_collisions: bool,
+        save_collision_trajectories: bool,
     ):
         self.name = name
         self.objects = objects
         self.start = start
         self.stop = stop
         self.save_collisions = save_collisions
-
+        self.save_collision_trajectories = save_collision_trajectories
     def _check_objects(self):
         """
         Check if all objects reside fully inside the section, runs upon initializatin.
@@ -129,6 +133,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         V: float,
         R: float,
         save_collisions: bool = False,
+        save_collision_trajectories: bool = False,
         stark_potential: None | npt.NDArray[np.float64] = None,
     ) -> None:
         """
@@ -148,7 +153,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
                                                     potential as a function of electric
                                                     field
         """
-        super().__init__(name, objects, start, stop, save_collisions)
+        super().__init__(name, objects, start, stop, save_collisions, save_collision_trajectories)
         self.V = V
         self.R = R
         self._stark_potential = np.polynomial.Polynomial([0])

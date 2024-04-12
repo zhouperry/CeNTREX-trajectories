@@ -71,6 +71,15 @@ def do_ballistic(
     timestamps_tracked = np.column_stack([timestamps_tracked, timestamp_list])
     coordinates_tracked.column_stack(coord_list)
     velocities_tracked.column_stack(velocities_list)
+    
+    # save collision trajectories
+    collision_trajectories = Trajectories()
+    if section.save_collision_trajectories:
+        hit = [k for k in trajectories.keys() if k not in indices]
+        idxs = np.arange(len(hit))
+        for idx, h in zip(idxs, hit):
+            collision_trajectories[idx] = trajectories[h]
+            collision_trajectories.add_data(idx, 0, collisions[0][0][idx], collisions[0][1][idx]) # time does not matter for the final point
 
     # remove trajectories that didn't make it through
     if len(trajectories) != 0:
@@ -81,7 +90,7 @@ def do_ballistic(
         for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
             trajectories.add_data(index, t, c, v)
 
-    section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
+    section_data = SectionData(section.name, collisions, collision_trajectories, nr_collisions, len(mask))
 
     return (
         timestamps_tracked,
@@ -207,6 +216,7 @@ def propagate_trajectories(
                         ],  # just give it one start coord, start is not used here
                         stop=section.start,
                         save_collisions=False,
+                        save_collision_trajectories=False,
                     ),
                     force=force,
                     z_save_section=z_save_section,
@@ -332,13 +342,13 @@ def propagate_trajectories(
                 SectionData(section.name, collisions, nr_collisions, nr_trajectories)
             )
 
-    if len(trajectories) == 0:
-        for index, t, c, v in zip(
-            indices, timestamps_tracked, coordinates_tracked, velocities_tracked
-        ):
-            trajectories[index] = Trajectory(t, c, v, index)
+        if len(trajectories) == 0:
+            for index, t, c, v in zip(
+                indices, timestamps_tracked, coordinates_tracked, velocities_tracked
+            ):
+                trajectories[index] = Trajectory(t, c, v, index)
 
-    # remove coordinate entries in a trajectory
-    for trajectory in trajectories.values():
-        trajectory.remove_duplicate_entries()
+        # remove coordinate entries in a trajectory
+        for trajectory in trajectories.values():
+            trajectory.remove_duplicate_entries()
     return section_data, trajectories

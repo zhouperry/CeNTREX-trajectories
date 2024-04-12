@@ -27,6 +27,7 @@ class SectionData:
 
     name: str
     saved_collisions: List[Any]
+    saved_collision_trajectories: List[Any]
     nr_collisions: int
     nr_trajectories: int
     survived: int = field(init=False)
