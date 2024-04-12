@@ -339,7 +339,7 @@ def propagate_trajectories(
                     trajectories.delete_trajectories(remove)
 
             section_data.append(
-                SectionData(section.name, collisions, nr_collisions, nr_trajectories)
+                SectionData(section.name, collisions, Trajectories(), nr_collisions, nr_trajectories)
             )
 
         if len(trajectories) == 0:
