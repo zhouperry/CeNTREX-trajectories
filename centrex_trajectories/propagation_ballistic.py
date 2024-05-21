@@ -154,14 +154,25 @@ def propagate_ballistic_trajectories(
     for obj in objects:
         # distance
         dz = obj.z_stop - accepted_coords.z
-        # velocity
-        vz = accepted_velocities.vz
-        # forward acceleration
-        fz = force.fz
-        t = calculate_time_ballistic(dz, vz, fz)
 
-        x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, force)
-        acceptance = obj.get_acceptance(accepted_coords, x, accepted_velocities, force)
+        if not np.allclose(dz, 0):
+            # velocity
+            vz = accepted_velocities.vz
+            # forward acceleration
+            fz = force.fz
+            t = calculate_time_ballistic(dz, vz, fz)
+
+            x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, force)
+        else:
+            t = deepcopy(t_accepted)
+            x, v = deepcopy(accepted_coords), deepcopy(accepted_velocities)
+        try:
+            acceptance = obj.get_acceptance(
+                accepted_coords, x, accepted_velocities, force
+            )
+        except AssertionError as error:
+            raise AssertionError(f"{obj} -> {error.args[0]}")
+        # why is this line here?
         acceptance &= ~np.isnan(t)
 
         if save_collisions:
