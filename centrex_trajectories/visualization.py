@@ -16,6 +16,7 @@ def plot_beamline(
     facecolor: str = "C0",
     edgecolor: str = "k",
     alpha: float = 0.5,
+    axis: str = "x",
 ):
     objects = []
     for section in sections:
@@ -24,11 +25,19 @@ def plot_beamline(
     height = 0.0
     for obj in objects:
         if isinstance(obj, CircularAperture):
-            if height <= (obj.y + obj.r) * 2:
-                height = (obj.y + obj.r) * 2
+            if axis == "x":
+                if height <= (obj.x + obj.r) * 2:
+                    height = (obj.x + obj.r) * 2
+            elif axis == "y":
+                if height <= (obj.y + obj.r) * 2:
+                    height = (obj.y + obj.r) * 2
         if isinstance(obj, RectangularAperture):
-            if height <= (obj.y + obj.wy / 2) * 2:
-                height = (obj.y + obj.wy / 2) * 2
+            if axis == "x":
+                if height <= (obj.x + obj.wx / 2) * 2:
+                    height = (obj.x + obj.wx / 2) * 2
+            elif axis == "y":
+                if height <= (obj.y + obj.wy / 2) * 2:
+                    height = (obj.y + obj.wy / 2) * 2
     patches = [
         Rectangle((section.start, -height), section.stop - section.start, 2 * height)
         for section in sections
@@ -42,14 +51,29 @@ def plot_beamline(
 
     for obj in objects:
         if isinstance(obj, CircularAperture):
-            ax.plot([obj.z, obj.z], [obj.y - obj.r, obj.y + obj.r], lw=4, color="C3")
+            if axis == "x":
+                ax.plot(
+                    [obj.z, obj.z], [obj.x - obj.r, obj.x + obj.r], lw=4, color="C3"
+                )
+            elif axis == "y":
+                ax.plot(
+                    [obj.z, obj.z], [obj.y - obj.r, obj.y + obj.r], lw=4, color="C3"
+                )
         if isinstance(obj, RectangularAperture):
-            ax.plot(
-                [obj.z, obj.z],
-                [obj.y - obj.wy / 2, obj.y + obj.wy / 2],
-                lw=4,
-                color="C3",
-            )
+            if axis == "x":
+                ax.plot(
+                    [obj.z, obj.z],
+                    [obj.x - obj.wx / 2, obj.x + obj.wx / 2],
+                    lw=4,
+                    color="C3",
+                )
+            elif axis == "y":
+                ax.plot(
+                    [obj.z, obj.z],
+                    [obj.y - obj.wy / 2, obj.y + obj.wy / 2],
+                    lw=4,
+                    color="C3",
+                )
 
     # Add collection to axes
     ax.add_collection(pc)
@@ -60,6 +84,6 @@ def plot_beamline(
     ax.set_ylim(-height * 1.1, height * 1.1)
 
     ax.set_xlabel("z [m]")
-    ax.set_ylabel("y [m]")
+    ax.set_ylabel(f"{axis} [m]")
 
     return ax

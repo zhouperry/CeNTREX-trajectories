@@ -98,7 +98,8 @@ class ODESection:
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -107,9 +108,8 @@ class ODESection:
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]: ...
+    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
+        ...
 
     def force(self, t, x, y, z):
         raise NotImplementedError
@@ -212,7 +212,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -221,9 +222,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]: ...
+    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
+        ...
 
     def force(self, t, x, y, z):
         """
@@ -406,7 +406,8 @@ class MagnetostaticHexapoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -415,9 +416,8 @@ class MagnetostaticHexapoleLens(ODESection):
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]: ...
+    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
+        ...
 
     def force(self, t, x, y, z):
         """

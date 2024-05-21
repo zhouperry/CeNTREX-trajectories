@@ -18,7 +18,7 @@ def generate_random_coordinates_normal_circle(
     x: float = 0,
     y: float = 0,
     z: float = 0,
-    rng: Optional[np.random.Generator] = None
+    rng: Optional[np.random.Generator] = None,
 ) -> Coordinates:
     """
     Generate normally distributed samples over a circle of radius `radius` in the xy
@@ -40,8 +40,8 @@ def generate_random_coordinates_normal_circle(
         rng = np.random.default_rng()
 
     return Coordinates(
-        x=x + rng.normal(0, sigma, number),
-        y=y + rng.normal(0, sigma, number),
+        x=rng.normal(x, sigma, number),
+        y=rng.normal(y, sigma, number),
         z=z * np.ones(number),
     )
 
@@ -53,7 +53,7 @@ def generate_random_coordinates_uniform_circle(
     x: float = 0,
     y: float = 0,
     z: float = 0,
-    rng: Optional[np.random.Generator] = None
+    rng: Optional[np.random.Generator] = None,
 ) -> Coordinates:
     """
     Generate random coordinates uniformly over a circle
@@ -74,10 +74,10 @@ def generate_random_coordinates_uniform_circle(
         rng = np.random.default_rng()
 
     theta = rng.uniform(0, 2 * np.pi, number)
-    r = np.sqrt(rng.uniform(0, radius, number))
+    r = np.sqrt(rng.uniform(0, radius**2, number))
     return Coordinates(
-        x=r * np.cos(theta),
-        y=r * np.sin(theta),
+        x=r * np.cos(theta) + x,
+        y=r * np.sin(theta) + y,
         z=z * np.ones(number),
     )
 
@@ -91,7 +91,7 @@ def generate_random_velocities_normal(
     sigma_vz: float,
     number: int,
     *,
-    rng: Optional[np.random.Generator] = None
+    rng: Optional[np.random.Generator] = None,
 ) -> Velocities:
     """
     Generate normally distributed velocity samples
@@ -113,7 +113,7 @@ def generate_random_velocities_normal(
     if rng is None:
         rng = np.random.default_rng()
     return Velocities(
-        vx=vx + rng.normal(vx, sigma_vx, number),
-        vy=vy + rng.normal(vy, sigma_vy, number),
-        vz=vz + rng.normal(vz, sigma_vz, number),
+        vx=rng.normal(vx, sigma_vx, number),
+        vy=rng.normal(vy, sigma_vy, number),
+        vz=rng.normal(vz, sigma_vz, number),
     )
