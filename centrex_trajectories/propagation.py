@@ -184,7 +184,9 @@ def propagate_trajectories(
             section_data.append(sec_dat)
         # propagate ODE if section is ODE
         elif section.propagation_type == PropagationType.ode:
-            if np.any(coordinates_tracked.get_last().z < section.start):
+            if np.any(
+                coordinates_tracked.get_last().z < section.start
+            ) and not np.allclose(coordinates_tracked.get_last().z, section.start):
                 # do ballistic until ode section
                 (
                     timestamps_tracked,
