@@ -251,12 +251,17 @@ def propagate_trajectories(
             # Should change to using and additional stop event that if the trajectory is
             # outside a certain range within the object z range it will stop the ODE
             # solver
+            acceleration = Acceleration(
+                force_cst.fx / particle.mass,
+                force_cst.fy / particle.mass,
+                force_cst.fz / particle.mass,
+            )
             masks = [
                 obj.get_acceptance(
                     coordinates_tracked.get_last(),
                     coordinates_tracked.get_last(),
                     velocities_tracked.get_last(),
-                    force_cst,
+                    acceleration,
                 )
                 for obj in section.objects
             ]

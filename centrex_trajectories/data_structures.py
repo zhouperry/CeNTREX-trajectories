@@ -79,7 +79,9 @@ class Acceleration:
 
     def __add__(self, other) -> Acceleration:
         if isinstance(other, Acceleration):
-            return Force(self.ax + other.ax, self.ay + other.ay, self.az + other.az)
+            return Acceleration(
+                self.ax + other.ax, self.ay + other.ay, self.az + other.az
+            )
         elif other is None:
             return self
         else:
