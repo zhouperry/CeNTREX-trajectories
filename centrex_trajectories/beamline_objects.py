@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from .common_types import NDArray_or_Float
-from .data_structures import Coordinates, Force, Velocities
+from .data_structures import Acceleration, Coordinates, Force, Velocities
 from .particles import Particle
 from .propagation_ballistic import calculate_time_ballistic, propagate_ballistic
 from .propagation_options import PropagationType
@@ -98,8 +98,7 @@ class ODESection:
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]:
-        ...
+    ) -> Tuple[float, float, float]: ...
 
     @overload
     def force(
@@ -108,8 +107,9 @@ class ODESection:
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
-        ...
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]: ...
 
     def force(self, t, x, y, z):
         raise NotImplementedError
@@ -128,6 +128,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
         stop: float,
         V: float,
         R: float,
+        x: float = 0,
+        y: float = 0,
         save_collisions: bool = False,
         stark_potential: None | npt.NDArray[np.float64] = None,
     ) -> None:
@@ -151,6 +153,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
         super().__init__(name, objects, start, stop, save_collisions)
         self.V = V
         self.R = R
+        self.x0 = x
+        self.y0 = y
         self._stark_potential = np.polynomial.Polynomial([0])
         self._check_objects()
         self._initialize_potentials(stark_potential)
@@ -167,6 +171,12 @@ class ElectrostaticQuadrupoleLens(ODESection):
             self._stark_potential = np.polynomial.Polynomial(stark_potential)
 
         self._stark_potential_derivative = self._stark_potential.deriv()
+
+    def x_transformed(self, x: NDArray_or_Float) -> NDArray_or_Float:
+        return x - self.x0
+
+    def y_transformed(self, y: NDArray_or_Float) -> NDArray_or_Float:
+        return y - self.y0
 
     def electric_field(
         self,
@@ -185,7 +195,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[NDArray[np.float64], float]: electric field at x,y,z in V/m
         """
-        return 2 * self.V * np.sqrt(x**2 + y**2) / (self.R) ** 2
+        _x = self.x_transformed(x)
+        _y = self.y_transformed(y)
+        return 2 * self.V * np.sqrt(_x**2 + _y**2) / (self.R) ** 2
 
     def electric_field_derivative_r(
         self,
@@ -212,8 +224,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]:
-        ...
+    ) -> Tuple[float, float, float]: ...
 
     @overload
     def force(
@@ -222,8 +233,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
-        ...
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]: ...
 
     def force(self, t, x, y, z):
         """
@@ -238,9 +250,15 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             List: force in x, y and z
         """
-        r = np.sqrt(x**2 + y**2)
-        dx = x / r
-        dy = y / r
+        _x = self.x_transformed(x)
+        _y = self.y_transformed(y)
+        r = np.sqrt(_x**2 + _y**2)
+        if r == 0:
+            dx = 0.0
+            dy = 0.0
+        else:
+            dx = _x / r
+            dy = _y / r
         stark = -self.stark_potential_derivative(
             x, y, z
         ) * self.electric_field_derivative_r(x, y, z)
@@ -406,8 +424,7 @@ class MagnetostaticHexapoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]:
-        ...
+    ) -> Tuple[float, float, float]: ...
 
     @overload
     def force(
@@ -416,8 +433,9 @@ class MagnetostaticHexapoleLens(ODESection):
         x: npt.NDArray[np.float_],
         y: npt.NDArray[np.float_],
         z: npt.NDArray[np.float_],
-    ) -> Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]]:
-        ...
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]: ...
 
     def force(self, t, x, y, z):
         """
@@ -508,7 +526,11 @@ class BeamlineObject:
         return (self.z >= start) & (self.z <= stop)
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
         raise NotImplementedError
 
@@ -535,7 +557,11 @@ class CircularAperture(BeamlineObject):
         return self.z
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
         """
         check if the supplied coordinates are within the aperture
@@ -577,7 +603,11 @@ class RectangularAperture(BeamlineObject):
         return self.z
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
         """
         check if the supplied coordinates are within the aperture
@@ -627,7 +657,11 @@ class RectangularApertureFinite(BeamlineObject):
         return self.z
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
         """
         check if the supplied coordinates are within the aperture
@@ -680,13 +714,21 @@ class PlateElectrodes(BeamlineObject):
         return self.z >= start and self.z + self.length <= stop
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
-        m, _, _ = self.get_collisions(start, stop, vels, force)
+        m, _, _ = self.get_collisions(start, stop, vels, acceleration)
         return ~m
 
     def get_collisions(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> Tuple[npt.NDArray[np.bool_], Coordinates, Velocities]:
         t = np.zeros(start.x.shape)
 
@@ -702,18 +744,18 @@ class PlateElectrodes(BeamlineObject):
         m_vneg = vels.vx < 0
 
         m = m_inside & m_vpos
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.fx)
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], acceleration.ax)
 
         m = m_inside & m_vneg
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.fx)
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], acceleration.ax)
 
         m = m_below & m_vpos
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], force.fx)
+        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], acceleration.ax)
 
         m = m_above & m_vneg
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], force.fx)
+        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], acceleration.ax)
 
-        x, v = propagate_ballistic(t, start, vels, force)
+        x, v = propagate_ballistic(t, start, vels, acceleration)
         m = x.z <= (self.z + self.length)
         m &= x.z >= self.z
         m &= np.abs(x.y - self.y) <= self.width / 2
@@ -746,7 +788,11 @@ class Bore(BeamlineObject):
         return self.z >= start and self.z + self.length <= stop
 
     def get_acceptance(
-        self, start: Coordinates, stop: Coordinates, vels: Velocities, force: Force
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
         mask_z = (stop.z >= self.z) & (stop.z <= self.z + self.length)
         mask_r = ((stop.x - self.x) ** 2 + (stop.y - self.y) ** 2) > self.radius**2

@@ -8,7 +8,14 @@ import numpy as np
 import numpy.typing as npt
 from scipy.optimize import OptimizeResult
 
-__all__: List[str] = ["Force", "Gravity", "Velocities", "Coordinates", "Trajectories"]
+__all__: List[str] = [
+    "Force",
+    "Acceleration",
+    "Gravity",
+    "Velocities",
+    "Coordinates",
+    "Trajectories",
+]
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,23 @@ class Force:
 
 
 Gravity = Force
+
+
+@dataclass
+class Acceleration:
+    ax: float
+    ay: float
+    az: float
+
+    def __add__(self, other) -> Acceleration:
+        if isinstance(other, Acceleration):
+            return Force(self.ax + other.ax, self.ay + other.ay, self.az + other.az)
+        elif other is None:
+            return self
+        else:
+            raise TypeError(
+                f"can only add Acceleration (not {type(other)}) to Acceleration"
+            )
 
 
 @dataclass

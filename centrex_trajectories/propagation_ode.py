@@ -8,6 +8,7 @@ from scipy.integrate import solve_ivp
 from scipy.optimize import OptimizeResult
 
 from .data_structures import Coordinates, Force, Velocities
+from .particles import TlF
 from .propagation_options import PropagationOptions
 
 __all__: List[str] = []
@@ -62,12 +63,12 @@ def solve_ode(*args) -> OptimizeResult:
     Returns:
         OptimizeResult: solution of the trajectory ODE
     """
-    t, x, v, z_stop, mass, force, gravity, events = args
+    t, x, v, z_stop, mass, force, force_cst, events = args
     t_span = [t, t + 2 * (z_stop - x.z) / v.vz]
     z_stop_event = z_stop_event_generator(z_stop)
     p = [x.x, x.y, x.z, v.vx, v.vy, v.vz]
     _ode_fun = partial(
-        ode_fun, **{"mass": mass, "force_fn": force, "force_cst": gravity}
+        ode_fun, **{"mass": mass, "force_fn": force, "force_cst": force_cst}
     )
     sol = solve_ivp(
         _ode_fun, t_span, p, events=events + [z_stop_event], rtol=1e-7, atol=1e-7
@@ -90,7 +91,7 @@ def ode_fun(
         d (List[float]): list with x,y,z,vx,vy,vz
         mass (float): mass of particle
         force (Callable): function describing the force as a function of x,y,z
-        gravity (Gravity): gravitational accelleration
+        force_cst (Force): constant force
 
     Returns:
         Union[List[npt.NDArray[np.float64]], List[float]]: RHS of trajectory propagation
@@ -105,9 +106,9 @@ def ode_fun(
         vx,
         vy,
         vz,
-        ax + force_cst.fx,
-        ay + force_cst.fy,
-        az + force_cst.fz,
+        ax + force_cst.fx / mass,
+        ay + force_cst.fy / mass,
+        az + force_cst.fz / mass,
     )
 
 
@@ -118,7 +119,7 @@ def propagate_ODE_trajectories(
     z_stop: float,
     mass: float,
     force_fun: Callable[[float, float, float, float], Tuple[float, float, float]],
-    force_cst: Force = Force(0.0, -9.81, 0.0),
+    force_cst: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
     events: Sequence[Callable[[float, float, float], float]] = [],
     z_save: Optional[
         Union[List[Union[float, int]], npt.NDArray[Union[np.float_, np.int_]]]

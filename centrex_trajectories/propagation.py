@@ -7,6 +7,7 @@ import numpy.typing as npt
 
 from .beamline_objects import ODESection, Section
 from .data_structures import (
+    Acceleration,
     Coordinates,
     Force,
     SectionData,
@@ -14,7 +15,7 @@ from .data_structures import (
     Trajectory,
     Velocities,
 )
-from .particles import Particle
+from .particles import Particle, TlF
 from .propagation_ballistic import propagate_ballistic_trajectories
 from .propagation_ode import propagate_ODE_trajectories
 from .propagation_options import PropagationOptions, PropagationType
@@ -29,6 +30,7 @@ def do_ballistic(
     velocities_tracked: Velocities,
     trajectories: Trajectories,
     section: Union[Section, ODESection],
+    particle: Particle,
     force: Force,
     z_save_section: Union[List[float], npt.NDArray[np.float_], None],
     options: PropagationOptions,
@@ -40,6 +42,12 @@ def do_ballistic(
     Trajectories,
     SectionData,
 ]:
+    force_cst = force + section.force
+    acceleration = Acceleration(
+        force_cst.fx / particle.mass,
+        force_cst.fy / particle.mass,
+        force_cst.fz / particle.mass,
+    )
     (
         mask,
         timestamp_list,
@@ -55,7 +63,7 @@ def do_ballistic(
         velocities_tracked.get_last(),
         section.objects,
         section.stop,
-        force + section.force,
+        acceleration,
         z_save=z_save_section,
         save_collisions=section.save_collisions,
         options=options,
@@ -99,7 +107,7 @@ def propagate_trajectories(
     velocities_init: Velocities,
     particle: Particle,
     t_start: Optional[npt.NDArray[np.float_]] = None,
-    force: Force = Force(0.0, -9.81, 0.0),
+    force: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
     z_save: Optional[List] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[List[SectionData], Trajectories]:
@@ -177,6 +185,7 @@ def propagate_trajectories(
                 velocities_tracked=velocities_tracked,
                 trajectories=trajectories,
                 section=section,
+                particle=particle,
                 force=force,
                 z_save_section=z_save_section,
                 options=options,
@@ -210,6 +219,7 @@ def propagate_trajectories(
                         stop=section.start,
                         save_collisions=False,
                     ),
+                    particle=particle,
                     force=force,
                     z_save_section=z_save_section,
                     options=options,

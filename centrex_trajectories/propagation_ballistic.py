@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-from .data_structures import Coordinates, Force, Velocities
+from .data_structures import Acceleration, Coordinates, Velocities
 from .propagation_options import PropagationOptions
 
 __all__: List[str] = []
@@ -15,7 +15,7 @@ def propagate_ballistic(
     t: npt.NDArray[np.float_],
     origin: Coordinates,
     velocities: Velocities,
-    force: Force,
+    acceleration: Acceleration,
 ) -> Tuple[Coordinates, Velocities]:
     """
     Propagate trajectories starting at `origin` with `velocities` for a time `t`
@@ -32,14 +32,14 @@ def propagate_ballistic(
     """
     return (
         Coordinates(
-            origin.x + velocities.vx * t + 1 / 2 * force.fx * t**2,
-            origin.y + velocities.vy * t + 1 / 2 * force.fy * t**2,
-            origin.z + velocities.vz * t + 1 / 2 * force.fz * t**2,
+            origin.x + velocities.vx * t + 1 / 2 * acceleration.ax * t**2,
+            origin.y + velocities.vy * t + 1 / 2 * acceleration.ay * t**2,
+            origin.z + velocities.vz * t + 1 / 2 * acceleration.az * t**2,
         ),
         Velocities(
-            velocities.vx + force.fx * t,
-            velocities.vy + force.fy * t,
-            velocities.vz + force.fz * t,
+            velocities.vx + acceleration.ax * t,
+            velocities.vy + acceleration.ay * t,
+            velocities.vz + acceleration.az * t,
         ),
     )
 
@@ -105,7 +105,7 @@ def propagate_ballistic_trajectories(
     velocities: Velocities,
     objects: List,
     z_stop: float,
-    force: Force = Force(0.0, -9.81, 0.0),
+    acceleration: Acceleration = Acceleration(0.0, -9.81, 0.0),
     z_save: Optional[Union[List[float], npt.NDArray[np.float_]]] = None,
     save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
@@ -159,16 +159,18 @@ def propagate_ballistic_trajectories(
             # velocity
             vz = accepted_velocities.vz
             # forward acceleration
-            fz = force.fz
-            t = calculate_time_ballistic(dz, vz, fz)
+            az = acceleration.az
+            t = calculate_time_ballistic(dz, vz, az)
 
-            x, v = propagate_ballistic(t, accepted_coords, accepted_velocities, force)
+            x, v = propagate_ballistic(
+                t, accepted_coords, accepted_velocities, acceleration
+            )
         else:
             t = deepcopy(t_accepted)
             x, v = deepcopy(accepted_coords), deepcopy(accepted_velocities)
         try:
             acceptance = obj.get_acceptance(
-                accepted_coords, x, accepted_velocities, force
+                accepted_coords, x, accepted_velocities, acceleration
             )
         except AssertionError as error:
             raise AssertionError(f"{obj} -> {error.args[0]}")
@@ -178,9 +180,9 @@ def propagate_ballistic_trajectories(
         if save_collisions:
             if hasattr(obj, "get_collisions"):
                 collisions.append(
-                    obj.get_collisions(accepted_coords, x, accepted_velocities, force)[
-                        1:
-                    ]
+                    obj.get_collisions(
+                        accepted_coords, x, accepted_velocities, acceleration
+                    )[1:]
                 )
             else:
                 collisions.append(
@@ -202,8 +204,8 @@ def propagate_ballistic_trajectories(
             coords = accepted_coords.get_last()
             vels = accepted_velocities.get_last()
             dz = z - coords.z
-            dt = calculate_time_ballistic(dz, vels.vz, force.fz)
-            x, v = propagate_ballistic(dt, coords, vels, force)
+            dt = calculate_time_ballistic(dz, vels.vz, acceleration.az)
+            x, v = propagate_ballistic(dt, coords, vels, acceleration)
             if idz != 0:
                 t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])
             else:
@@ -214,8 +216,8 @@ def propagate_ballistic_trajectories(
     # timestamps, coordinates and velocities at the end of the section
     coords = accepted_coords.get_last()
     vels = accepted_velocities.get_last()
-    dt = calculate_time_ballistic(z_stop - coords.z, vels.vz, force.fz)
-    x, v = propagate_ballistic(dt, coords, vels, force)
+    dt = calculate_time_ballistic(z_stop - coords.z, vels.vz, acceleration.az)
+    x, v = propagate_ballistic(dt, coords, vels, acceleration)
 
     if z_save is not None and len(z_save) > 0:
         t_accepted = np.column_stack([t_accepted, t_accepted[:, -1] + dt])

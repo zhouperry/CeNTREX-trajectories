@@ -1,3 +1,8 @@
+[![Python versions on PyPI](https://img.shields.io/pypi/pyversions/centrex-trajectories.svg)](https://pypi.python.org/pypi/centrex-trajectories/)
+[![CeNTREX-TlF version on PyPI](https://img.shields.io/pypi/v/centrex-trajectories.svg "CeNTREX-TlF on PyPI")](https://pypi.python.org/pypi/centrex-trajectories/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+
 # CeNTREX-trajectories
 Code for simulating CeNTREX trajectories
 
@@ -99,8 +104,8 @@ velocities_init = Velocities(
 )
 
 options = PropagationOptions(n_cores=6, verbose=False)
-gravity = Force(0, -9.81, 0)
 particle = TlF()
+gravity = Force(0, -9.81*particle.mass, 0)
 
 section_data, trajectories = propagate_trajectories(
     sections,
