@@ -50,8 +50,8 @@ class TaskSpeed(ProgressColumn):
 total_runs = 10
 n_trajectories = 4_000_000
 options = PropagationOptions(verbose=False)
-gravity = Force(0, -9.81, 0)
 particle = TlF()
+gravity = Force(0, -9.81 * particle.mass, 0)
 # Ls = np.linspace(0.1, 0.7, 5)
 Ls = [0, 0.6]
 Vs = np.linspace(0, 30e3, 16)
