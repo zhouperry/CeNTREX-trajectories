@@ -82,14 +82,14 @@ class ODESection:
         start: float,
         stop: float,
         save_collisions: bool,
-        save_collision_trajectories: bool,
+        # save_collision_trajectories: bool,
     ):
         self.name = name
         self.objects = objects
         self.start = start
         self.stop = stop
         self.save_collisions = save_collisions
-        self.save_collision_trajectories = save_collision_trajectories
+        # self.save_collision_trajectories = save_collision_trajectories
     def _check_objects(self):
         """
         Check if all objects reside fully inside the section, runs upon initializatin.
@@ -134,6 +134,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         R: float,
         x: float = 0,
         y: float = 0,
+        tilt: float = 0,
         save_collisions: bool = False,
         stark_potential: None | npt.NDArray[np.float64] = None,
     ) -> None:
@@ -147,6 +148,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
             stop (float): stop of section in z [m]
             V (float): Voltage on electrodes [Volts]
             R (float): radius of lens bore [m]
+            x: offset in x [m] (translation)
+            y: offset in y [m]
+            tilt: tilt from the center [radian] (only along y axis in the xz plane)
             save_collisions (Optional[bool], optional): Save the coordinates and
                                                     velocities of collisions in this
                                                     section. Defaults to False.
@@ -159,6 +163,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         self.R = R
         self.x0 = x
         self.y0 = y
+        self.tilt = tilt
         self._stark_potential = np.polynomial.Polynomial([0])
         self._check_objects()
         self._initialize_potentials(stark_potential)
@@ -176,11 +181,55 @@ class ElectrostaticQuadrupoleLens(ODESection):
 
         self._stark_potential_derivative = self._stark_potential.deriv()
 
-    def x_transformed(self, x: NDArray_or_Float) -> NDArray_or_Float:
-        return x - self.x0
+    def translation(self,
+        x: NDArray_or_Float,
+        y: NDArray_or_Float,
+        z: NDArray_or_Float,
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]:
+        """
+        Given the position x, y, z, generate the relative coordinates w.r.t. the lens
+        
+        Args:
+            x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
+            y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
+            z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
 
-    def y_transformed(self, y: NDArray_or_Float) -> NDArray_or_Float:
-        return y - self.y0
+        Returns:
+            Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]] transformed coordinates
+        """
+        return (x - self.x0, y - self.y0, z)
+
+    def rotation(self,
+        x: NDArray_or_Float,
+        y: NDArray_or_Float,
+        z: NDArray_or_Float,
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]:
+        """
+        Given the position x, y, z, generate the relative coordinates w.r.t. the lens coordinate system
+        
+        Args:
+            x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
+            y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
+            z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
+
+        Returns:
+            Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]] transformed coordinates
+        """
+        return (x*np.cos(self.tilt)-z*np.sin(self.tilt), y, x*np.sin(self.tilt)+z*np.cos(self.tilt))
+
+    def coordinate_transformation(self,
+        x: NDArray_or_Float,
+        y: NDArray_or_Float,
+        z: NDArray_or_Float,
+    ) -> Tuple[
+        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+    ]:
+        _x, _y, _z = self.translation(x,y,z)
+        return self.rotation(_x, _y, _z)
 
     def electric_field(
         self,
@@ -199,8 +248,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[NDArray[np.float64], float]: electric field at x,y,z in V/m
         """
-        _x = self.x_transformed(x)
-        _y = self.y_transformed(y)
+        _x, _y, _z = self.coordinate_transformation(x,y,z)
         return 2 * self.V * np.sqrt(_x**2 + _y**2) / (self.R) ** 2
 
     def electric_field_derivative_r(
@@ -254,8 +302,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             List: force in x, y and z
         """
-        _x = self.x_transformed(x)
-        _y = self.y_transformed(y)
+        _x, _y, _z = self.coordinate_transformation(x,y,z)
         r = np.sqrt(_x**2 + _y**2)
         if r == 0:
             dx = 0.0
@@ -266,7 +313,7 @@ class ElectrostaticQuadrupoleLens(ODESection):
         stark = -self.stark_potential_derivative(
             x, y, z
         ) * self.electric_field_derivative_r(x, y, z)
-        return (stark * dx, stark * dy, 0)
+        return (stark * dx * np.cos(self.tilt), stark * dy, -stark * dx * np.sin(self.tilt))
 
     def stark_potential_derivative(
         self,
