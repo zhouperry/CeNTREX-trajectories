@@ -155,7 +155,6 @@ class ElectrostaticQuadrupoleLens(ODESection):
         self.R = R
         self.x0 = x
         self.y0 = y
-        self._stark_potential = np.polynomial.Polynomial([0])
         self._check_objects()
         self._initialize_potentials(stark_potential)
 
