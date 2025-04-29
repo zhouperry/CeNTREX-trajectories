@@ -16,7 +16,7 @@ __all__: List[str] = []
 
 def z_stop_event_generator(
     z_stop: float,
-) -> Callable[[float, npt.NDArray[np.float_]], float]:
+) -> Callable[[float, npt.NDArray[np.floating]], float]:
     """
     Generate a terminal event function for solve_ivp that returns zero when z equals
     z_stop
@@ -30,7 +30,7 @@ def z_stop_event_generator(
 
     def event(
         t: float,
-        y: npt.NDArray[np.float_],
+        y: npt.NDArray[np.floating],
     ) -> float:
         return y[2] - z_stop
 
@@ -41,13 +41,13 @@ def z_stop_event_generator(
 
 def collision_event_generator(
     collision_events: Sequence[Callable[[float, float, float], float]],
-) -> Sequence[Callable[[float, npt.NDArray[np.float_]], float]]:
+) -> Sequence[Callable[[float, npt.NDArray[np.floating]], float]]:
     events = []
     for collision_event in collision_events:
 
         def event(
             t: float,
-            y: npt.NDArray[np.float_],
+            y: npt.NDArray[np.floating],
         ) -> float:
             return collision_event(y[0], y[1], y[2])
 
@@ -113,7 +113,7 @@ def ode_fun(
 
 
 def propagate_ODE_trajectories(
-    t_start: npt.NDArray[np.float_],
+    t_start: npt.NDArray[np.floating],
     origin: Coordinates,
     velocities: Velocities,
     z_stop: float,
@@ -122,7 +122,7 @@ def propagate_ODE_trajectories(
     force_cst: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
     events: Sequence[Callable[[float, float, float], float]] = [],
     z_save: Optional[
-        Union[List[Union[float, int]], npt.NDArray[Union[np.float_, np.int_]]]
+        Union[List[Union[float, int]], npt.NDArray[Union[np.floating, np.int_]]]
     ] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> List[OptimizeResult]:

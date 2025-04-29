@@ -12,7 +12,7 @@ __all__: List[str] = []
 
 
 def propagate_ballistic(
-    t: npt.NDArray[np.float_],
+    t: npt.NDArray[np.floating],
     origin: Coordinates,
     velocities: Velocities,
     acceleration: Acceleration,
@@ -21,7 +21,7 @@ def propagate_ballistic(
     Propagate trajectories starting at `origin` with `velocities` for a time `t`
 
     Args:
-        t (NDArray[np.float_]): time to propagate per particle
+        t (NDArray[np.floating]): time to propagate per particle
         origin (Coordinates): origin of each particle
         velocities (Velocities): velocity of each particle
         gravity (Gravity): gravitational accelleration
@@ -45,8 +45,8 @@ def propagate_ballistic(
 
 
 def calculate_time_ballistic(
-    dx: npt.NDArray[np.float_], v: npt.NDArray[np.float_], a: float = 0.0
-) -> npt.NDArray[np.float_]:
+    dx: npt.NDArray[np.floating], v: npt.NDArray[np.floating], a: float = 0.0
+) -> npt.NDArray[np.floating]:
     """
     Calculate the time it takes a ballistic trajectory to travel a distance x
 
@@ -100,18 +100,18 @@ def calculate_time_ballistic(
 
 
 def propagate_ballistic_trajectories(
-    t_start: npt.NDArray[np.float_],
+    t_start: npt.NDArray[np.floating],
     origin: Coordinates,
     velocities: Velocities,
     objects: List,
     z_stop: float,
     acceleration: Acceleration = Acceleration(0.0, -9.81, 0.0),
-    z_save: Optional[Union[List[float], npt.NDArray[np.float_]]] = None,
+    z_save: Optional[Union[List[float], npt.NDArray[np.floating]]] = None,
     save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[
     npt.NDArray[np.bool_],
-    npt.NDArray[np.float_],
+    npt.NDArray[np.floating],
     Coordinates,
     Velocities,
     int,
@@ -122,7 +122,7 @@ def propagate_ballistic_trajectories(
     coordinates and velocities and at z positions specified in z_save.
 
     Args:
-        t_start (npt.NDArray[np.float_]): start times
+        t_start (npt.NDArray[np.floating]): start times
         origin (Coordinates): origin coordintes
         velocities (Velocities): initial velocities
         apertures (List): apertures
@@ -136,7 +136,7 @@ def propagate_ballistic_trajectories(
 
     Returns:
         Tuple[
-            npt.NDArray[np.bool_], npt.NDArray[np.float_], Coordinates, Velocities, int,
+            npt.NDArray[np.bool_], npt.NDArray[np.floating], Coordinates, Velocities, int,
             List[Tuple[Coordinates, Velocities]]
             ]: tuple with a boolean array of trajectories that survive, indices array
                 with indices that survive, coordinates, velocities, nr_collisions and a

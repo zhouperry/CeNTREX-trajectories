@@ -64,9 +64,9 @@ class Section:
         Check if all objects reside fully inside the section, runs upon initialization.
         """
         for o in self.objects:
-            assert o.check_in_bounds(
-                self.start, self.stop
-            ), f"{o.name} not inside {self.name}"
+            assert o.check_in_bounds(self.start, self.stop), (
+                f"{o.name} not inside {self.name}"
+            )
 
 
 class ODESection:
@@ -91,9 +91,9 @@ class ODESection:
         Check if all objects reside fully inside the section, runs upon initializatin.
         """
         for o in self.objects:
-            assert o.check_in_bounds(
-                self.start, self.stop
-            ), f"{o.name} not inside {self.name}"
+            assert o.check_in_bounds(self.start, self.stop), (
+                f"{o.name} not inside {self.name}"
+            )
 
     @overload
     def force(
@@ -104,11 +104,11 @@ class ODESection:
     def force(
         self,
         t: float,
-        x: npt.NDArray[np.float_],
-        y: npt.NDArray[np.float_],
-        z: npt.NDArray[np.float_],
+        x: npt.NDArray[np.float64],
+        y: npt.NDArray[np.float64],
+        z: npt.NDArray[np.float64],
     ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+        npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
     ]: ...
 
     def force(self, t, x, y, z):
@@ -229,11 +229,11 @@ class ElectrostaticQuadrupoleLens(ODESection):
     def force(
         self,
         t: float,
-        x: npt.NDArray[np.float_],
-        y: npt.NDArray[np.float_],
-        z: npt.NDArray[np.float_],
+        x: npt.NDArray[np.float64],
+        y: npt.NDArray[np.float64],
+        z: npt.NDArray[np.float64],
     ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+        npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
     ]: ...
 
     def force(self, t, x, y, z):
@@ -429,14 +429,20 @@ class MagnetostaticHexapoleLens(ODESection):
     def force(
         self,
         t: float,
-        x: npt.NDArray[np.float_],
-        y: npt.NDArray[np.float_],
-        z: npt.NDArray[np.float_],
+        x: npt.NDArray[np.floating],
+        y: npt.NDArray[np.floating],
+        z: npt.NDArray[np.floating],
     ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
+        npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]
     ]: ...
 
-    def force(self, t, x, y, z):
+    def force(
+        self,
+        t,
+        x,
+        y,
+        z,
+    ):
         """
         Calculate the force at x,y,z
 
@@ -572,9 +578,9 @@ class CircularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(
-            stop.z, self.z
-        ), "supplied coordinates not at location of aperture"
+        assert np.allclose(stop.z, self.z), (
+            "supplied coordinates not at location of aperture"
+        )
         return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r**2
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
@@ -618,9 +624,9 @@ class RectangularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(
-            stop.z, self.z
-        ), "supplied coordinates not at location of aperture"
+        assert np.allclose(stop.z, self.z), (
+            "supplied coordinates not at location of aperture"
+        )
         return (np.abs((stop.x - self.x)) <= self.wx / 2) & (
             np.abs((stop.y - self.y)) <= self.wy / 2
         )
@@ -675,9 +681,9 @@ class RectangularApertureFinite(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(
-            stop.z, self.z
-        ), "supplied coordinates not at location of aperture"
+        assert np.allclose(stop.z, self.z), (
+            "supplied coordinates not at location of aperture"
+        )
         inside_aperture = (np.abs((stop.x - self.x)) <= self.wx / 2) & (
             np.abs((stop.y - self.y)) <= self.wy / 2
         )

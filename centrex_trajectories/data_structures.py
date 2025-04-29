@@ -265,14 +265,14 @@ class Coordinates:
     Coordinates
 
     Attributes:
-        x (NDArray[np.float_]): coordinates in x [m]
-        y (NDArray[np.float_]): coordinates in y [m]
-        z (NDArray[np.float_]): coordinates in z [m]
+        x (NDArray[np.floating]): coordinates in x [m]
+        y (NDArray[np.floating]): coordinates in y [m]
+        z (NDArray[np.floating]): coordinates in z [m]
     """
 
-    x: npt.NDArray[np.float_]
-    y: npt.NDArray[np.float_]
-    z: npt.NDArray[np.float_]
+    x: npt.NDArray[np.floating]
+    y: npt.NDArray[np.floating]
+    z: npt.NDArray[np.floating]
 
     def get_masked(self, mask: npt.NDArray[np.bool_]) -> Coordinates:
         """
@@ -403,19 +403,19 @@ class Trajectory:
     Trajectory holds the timestamps, coordinates and velocities for a single particle
 
     Attributes:
-        t (ndarray[float_]) timestamps [s]
+        t (ndarray[np.floating]) timestamps [s]
         coordinates (Coordinates): coordinates
         velocities (Velocities): velocities
-        x (ndarray[float_]): coordinates in x [m]
-        y (ndarray[float_]): coordinates in y [m]
-        z (ndarray[float_]): coordinates in z [m]
-        vx (ndarray[float_]): velocities in x [m/s]
-        vy (ndarray[float_]): velocities in y [m/s]
-        vz (ndarray[float_]): velocities in z [m/s]
+        x (ndarray[np.floating]): coordinates in x [m]
+        y (ndarray[np.floating]): coordinates in y [m]
+        z (ndarray[np.floating]): coordinates in z [m]
+        vx (ndarray[np.floating]): velocities in x [m/s]
+        vy (ndarray[np.floating]): velocities in y [m/s]
+        vz (ndarray[np.floating]): velocities in z [m/s]
         index (int): index of particle, from initial distribution
     """
 
-    t: npt.NDArray[np.float_]
+    t: npt.NDArray[np.floating]
     coordinates: Coordinates
     velocities: Velocities
     index: int
@@ -436,68 +436,68 @@ class Trajectory:
         return len(self.coordinates)
 
     @property
-    def x(self) -> npt.NDArray[np.float_]:
+    def x(self) -> npt.NDArray[np.floating]:
         """
         x coordinates [m]
 
         Returns:
-            NDArray[np.float_]: x coordinates [m]
+            NDArray[np.floating]: x coordinates [m]
         """
         return self.coordinates.x
 
     @property
-    def y(self) -> npt.NDArray[np.float_]:
+    def y(self) -> npt.NDArray[np.floating]:
         """
         y coordinates [m]
 
         Returns:
-            NDArray[np.float_]: y coordinates [m]
+            NDArray[np.floating]: y coordinates [m]
         """
         return self.coordinates.y
 
     @property
-    def z(self) -> npt.NDArray[np.float_]:
+    def z(self) -> npt.NDArray[np.floating]:
         """
         z coordinates [z]
 
         Returns:
-            NDArray[np.float_]: z coordinates [m]
+            NDArray[np.floating]: z coordinates [m]
         """
         return self.coordinates.z
 
     @property
-    def vx(self) -> npt.NDArray[np.float_]:
+    def vx(self) -> npt.NDArray[np.floating]:
         """
         x velocities [m/s]
 
         Returns:
-            NDArray[np.float_]: x velocities [m/s]
+            NDArray[np.floating]: x velocities [m/s]
         """
         return self.velocities.vx
 
     @property
-    def vy(self) -> npt.NDArray[np.float_]:
+    def vy(self) -> npt.NDArray[np.floating]:
         """
         y velocities [m/s]
 
         Returns:
-            NDArray[np.float_]: y velocities [m/s]
+            NDArray[np.floating]: y velocities [m/s]
         """
         return self.velocities.vy
 
     @property
-    def vz(self) -> npt.NDArray[np.float_]:
+    def vz(self) -> npt.NDArray[np.floating]:
         """
         z velocities [m/s]
 
         Returns:
-            NDArray[np.float_]: z velocities [m/s]
+            NDArray[np.floating]: z velocities [m/s]
         """
         return self.velocities.vz
 
     def append(
         self,
-        t: npt.NDArray[np.float_],
+        t: npt.NDArray[np.floating],
         coordinates: Coordinates,
         velocities: Velocities,
     ) -> None:
@@ -505,7 +505,7 @@ class Trajectory:
         append timestamps, coordinates and velocities to the trajectory
 
         Args:
-            t (NDArray[np.float_]): timestamps
+            t (NDArray[np.floating]): timestamps
             coordinates (Coordinates): coordinates
             velocities (Velocities): velocities
         """
@@ -588,7 +588,7 @@ class Trajectories(MutableMapping):
     def add_data(
         self,
         index: int,
-        t: npt.NDArray[np.float_],
+        t: npt.NDArray[np.floating],
         coordinates: Coordinates,
         velocities: Velocities,
     ) -> None:
@@ -597,7 +597,7 @@ class Trajectories(MutableMapping):
 
         Args:
             index (int): index
-            t (NDArray[np.float_]): timestamps [s]
+            t (NDArray[np.floating]): timestamps [s]
             coordinates (Coordinates): coordinates
             velocities (Velocities): velocities
         """
