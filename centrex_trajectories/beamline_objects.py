@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,13 @@ class Section:
             assert o.check_in_bounds(self.start, self.stop), (
                 f"{o.name} not inside {self.name}"
             )
+
+
+@dataclass
+class LinearSection(Section):
+    spring_constant: tuple[float, ...] = (0.0, 0.0, 0.0)
+    propagation_type: PropagationType = PropagationType.linear
+    force: Optional[Force] = None
 
 
 class ODESection:
@@ -812,3 +820,128 @@ class Bore(BeamlineObject):
         z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
 
         return (r - self.radius) + z_factor
+
+    def get_collisions_linear(
+        self,
+        start: Coordinates,
+        stop: Coordinates,
+        vels: Velocities,
+        acceleration: Acceleration,
+        w: tuple[float, float, float],
+        trap_center: tuple[float, float],
+    ):
+        assert w[2] == 0
+        assert w[0] == w[1]
+
+        x0, y0, z0 = map(np.asarray, (start.x, start.y, start.z))
+        vx0, vy0, vz0 = map(np.asarray, (vels.vx, vels.vy, vels.vz))
+        z_goal = np.asarray(stop.z) if np.ndim(stop.z) else np.full_like(z0, stop.z)
+
+        N = x0.size
+        ω = w[0]
+        if not np.allclose(w[0], w[1]) or ω <= 0.0:
+            raise ValueError("isotropic case requires w=(ω,ω,0) with ω>0")
+
+        # ► cylinder axis (scalar → broadcast)
+        cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N, self.x)
+        cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N, self.y)
+
+        # ► trap (spring) centre from argument
+        sx, sy = trap_center
+        sx = np.asarray(sx) if np.ndim(sx) else np.full(N, sx)
+        sy = np.asarray(sy) if np.ndim(sy) else np.full(N, sy)
+
+        # static shift due to constant acceleration
+        ox = sx + acceleration.ax / ω**2
+        oy = sy + acceleration.ay / ω**2
+
+        # bring motion into cylinder-centred frame
+        Cx = ox - cx
+        Cy = oy - cy
+        Ax = x0 - ox
+        Ay = y0 - oy
+        Bx = vx0 / ω
+        By = vy0 / ω
+
+        R2 = self.radius**2
+        az = acceleration.az
+
+        # ═════════════════════════════════════════════════════════════════════
+        # 1) z-window  (solve quadratic / linear for each trajectory)
+        # ═════════════════════════════════════════════════════════════════════
+        dz = z_goal - z0
+        if abs(az) < 1e-14:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                t_end = dz / vz0
+        else:
+            a, b, c = 0.5 * az, vz0, -dz
+            disc = b * b - 4 * a * c
+            disc[disc < 0] = 0
+            srt = np.sqrt(disc)
+            t1, t2 = (-b - srt) / (2 * a), (-b + srt) / (2 * a)
+            t_end = np.where(dz >= 0, np.maximum(t1, t2), np.minimum(t1, t2))
+        valid = (t_end > 0) & np.isfinite(t_end)
+
+        # allocate outputs
+        hit = np.zeros(N, bool)
+        t_hit = np.full(N, np.nan)
+        x_hit = np.full(N, np.nan)
+        y_hit = np.full(N, np.nan)
+        z_hit = np.full(N, np.nan)
+
+        if not valid.any():
+            return hit, t_hit, x_hit, y_hit, z_hit
+
+        survivors = np.where(valid)[0]
+
+        # ═════════════════════════════════════════════════════════════════════
+        # 2) analytic first-hit for each survivor  (quartic → roots)
+        # ═════════════════════════════════════════════════════════════════════
+        for i in survivors:
+            # coefficients of  r²(θ) = (Cx + Ax cosθ + Bx sinθ)² + (Cy + …)² − R²
+            a = Bx[i] * Cy[i] + By[i] * Cx[i] + Ax[i] * By[i] + Ay[i] * Bx[i]
+            b = (
+                Ax[i] * Cx[i]
+                + Ay[i] * Cy[i]
+                + 0.5 * (Ax[i] ** 2 + Ay[i] ** 2 - Bx[i] ** 2 - By[i] ** 2)
+                + Cx[i] ** 2
+                + Cy[i] ** 2
+                - R2
+            )
+            c = Ax[i] * By[i] + Ay[i] * Bx[i]
+            d = 0.5 * (Ax[i] ** 2 + Ay[i] ** 2 - Bx[i] ** 2 - By[i] ** 2)
+            e = Cx[i] * Ax[i] + Cy[i] * Ay[i]
+
+            # quartic  Au⁴+Bu³+Cu²+Du+E = 0  with  u = tan(θ/2)
+            A4 = d + b
+            A3 = 2 * (c + a)
+            A2 = 2 * b + 6 * R2 - 6 * (Cx[i] ** 2 + Cy[i] ** 2)
+            A1 = 2 * (c - a)
+            A0 = d - b
+
+            roots = np.roots([A4, A3, A2, A1, A0])
+            roots = roots.real[np.abs(roots.imag) < 1e-9]
+            if roots.size == 0:
+                continue
+
+            θ = 2 * np.arctan(roots)
+            θ = (θ + 2 * np.pi) % (2 * np.pi)  # to [0,2π)
+            t_cand = θ / ω
+            t_cand = t_cand[(t_cand > 0) & (t_cand <= t_end[i])]
+            if t_cand.size == 0:
+                continue
+
+            t_first = float(np.min(t_cand))
+            Cθ, Sθ = math.cos(ω * t_first), math.sin(ω * t_first)
+
+            xh = cx[i] + Cx[i] + Ax[i] * Cθ + Bx[i] * Sθ
+            yh = cy[i] + Cy[i] + Ay[i] * Cθ + By[i] * Sθ
+            zh = z0[i] + vz0[i] * t_first + 0.5 * az * t_first**2
+
+            hit[i] = True
+            t_hit[i] = t_first
+            x_hit[i] = xh
+            y_hit[i] = yh
+            z_hit[i] = zh
+
+        return hit, t_hit, x_hit, y_hit, z_hit

@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-from .beamline_objects import ODESection, Section
+from .beamline_objects import LinearSection, ODESection, Section
 from .data_structures import (
     Acceleration,
     Coordinates,
@@ -17,6 +17,7 @@ from .data_structures import (
 )
 from .particles import Particle, TlF
 from .propagation_ballistic import propagate_ballistic_trajectories
+from .propagation_linear import propagate_linear_trajectories
 from .propagation_ode import propagate_ODE_trajectories
 from .propagation_options import PropagationOptions, PropagationType
 
@@ -64,6 +65,90 @@ def do_ballistic(
         section.objects,
         section.stop,
         acceleration,
+        z_save=z_save_section,
+        save_collisions=section.save_collisions,
+        options=options,
+    )
+
+    # only keep trajectories that made it through
+    timestamps_tracked = timestamps_tracked[mask]
+    coordinates_tracked = coordinates_tracked.get_masked(mask)
+    velocities_tracked = velocities_tracked.get_masked(mask)
+    indices = indices[mask]
+
+    # append latest timestamps, coordinates and velocities to the 2D arrays
+    timestamps_tracked = np.column_stack([timestamps_tracked, timestamp_list])
+    coordinates_tracked.column_stack(coord_list)
+    velocities_tracked.column_stack(velocities_list)
+
+    # remove trajectories that didn't make it through
+    if len(trajectories) != 0:
+        remove = [k for k in trajectories.keys() if k not in indices]
+        trajectories.delete_trajectories(remove)
+
+        # update trajectories that did make it through
+        for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
+            trajectories.add_data(index, t, c, v)
+
+    section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
+
+    return (
+        timestamps_tracked,
+        coordinates_tracked,
+        velocities_tracked,
+        indices,
+        trajectories,
+        section_data,
+    )
+
+
+def do_linear(
+    indices: npt.NDArray[np.int_],
+    timestamps_tracked: npt.NDArray[np.floating],
+    coordinates_tracked: Coordinates,
+    velocities_tracked: Velocities,
+    trajectories: Trajectories,
+    section: LinearSection,
+    particle: Particle,
+    force: Force,
+    z_save_section: Union[List[float], npt.NDArray[np.floating], None],
+    options: PropagationOptions,
+) -> tuple[
+    npt.NDArray[np.floating],
+    Coordinates,
+    Velocities,
+    npt.NDArray[np.int_],
+    Trajectories,
+    SectionData,
+]:
+    force_cst = force + section.force
+    acceleration = Acceleration(
+        force_cst.fx / particle.mass,
+        force_cst.fy / particle.mass,
+        force_cst.fz / particle.mass,
+    )
+    w = (
+        math.sqrt(section.spring_constant[0] / particle.mass),
+        math.sqrt(section.spring_constant[1] / particle.mass),
+        math.sqrt(section.spring_constant[2] / particle.mass),
+    )
+    (
+        mask,
+        timestamp_list,
+        coord_list,
+        velocities_list,
+        nr_collisions,
+        collisions,
+    ) = propagate_linear_trajectories(
+        timestamps_tracked
+        if timestamps_tracked.ndim == 1
+        else timestamps_tracked[:, -1],
+        coordinates_tracked.get_last(),
+        velocities_tracked.get_last(),
+        section.objects,
+        section.stop,
+        acceleration,
+        w,
         z_save=z_save_section,
         save_collisions=section.save_collisions,
         options=options,
@@ -348,6 +433,28 @@ def propagate_trajectories(
             section_data.append(
                 SectionData(section.name, collisions, nr_collisions, nr_trajectories)
             )
+        # propagate linear if section is linear
+        elif section.propagation_type == PropagationType.linear:
+            (
+                timestamps_tracked,
+                coordinates_tracked,
+                velocities_tracked,
+                indices,
+                trajectories,
+                sec_dat,
+            ) = do_linear(
+                indices=indices,
+                timestamps_tracked=timestamps_tracked,
+                coordinates_tracked=coordinates_tracked,
+                velocities_tracked=velocities_tracked,
+                trajectories=trajectories,
+                section=section,
+                particle=particle,
+                force=force,
+                z_save_section=z_save_section,
+                options=options,
+            )
+            section_data.append(sec_dat)
 
     if len(trajectories) == 0:
         for index, t, c, v in zip(

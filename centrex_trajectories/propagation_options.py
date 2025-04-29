@@ -12,10 +12,12 @@ class PropagationType(Enum):
     Attributes
         ballistic (int): ballistic trajectory
         ode (int): ode trajectory
+        linear (int): linear restoring force trajectory
     """
 
     ballistic = auto()
     ode = auto()
+    linear = auto()
 
 
 @dataclass
