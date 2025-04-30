@@ -140,15 +140,16 @@ def do_linear(
         nr_collisions,
         collisions,
     ) = propagate_linear_trajectories(
-        timestamps_tracked
+        t_start=timestamps_tracked
         if timestamps_tracked.ndim == 1
         else timestamps_tracked[:, -1],
-        coordinates_tracked.get_last(),
-        velocities_tracked.get_last(),
-        section.objects,
-        section.stop,
-        acceleration,
-        w,
+        origin=coordinates_tracked.get_last(),
+        velocities=velocities_tracked.get_last(),
+        objects=section.objects,
+        z_stop=section.stop,
+        acceleration=acceleration,
+        w=w,
+        trap_center=(section.x, section.y),
         z_save=z_save_section,
         save_collisions=section.save_collisions,
         options=options,
@@ -187,7 +188,7 @@ def do_linear(
 
 
 def propagate_trajectories(
-    sections: List[Union[Section, ODESection]],
+    sections: List[Union[Section, ODESection, LinearSection]],
     coordinates_init: Coordinates,
     velocities_init: Velocities,
     particle: Particle,

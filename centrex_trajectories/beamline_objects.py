@@ -14,6 +14,7 @@ from .data_structures import Acceleration, Coordinates, Force, Velocities
 from .particles import Particle
 from .propagation_ballistic import calculate_time_ballistic, propagate_ballistic
 from .propagation_options import PropagationType
+from .utils import bounds_check_tolerance
 
 __all__ = [
     "Section",
@@ -65,13 +66,15 @@ class Section:
         Check if all objects reside fully inside the section, runs upon initialization.
         """
         for o in self.objects:
-            assert o.check_in_bounds(self.start, self.stop), (
-                f"{o.name} not inside {self.name}"
-            )
+            assert o.check_in_bounds(
+                self.start, self.stop
+            ), f"{o.name} not inside {self.name}"
 
 
 @dataclass
 class LinearSection(Section):
+    x: float = 0.0
+    y: float = 0.0
     spring_constant: tuple[float, ...] = (0.0, 0.0, 0.0)
     propagation_type: PropagationType = PropagationType.linear
     force: Optional[Force] = None
@@ -99,9 +102,9 @@ class ODESection:
         Check if all objects reside fully inside the section, runs upon initializatin.
         """
         for o in self.objects:
-            assert o.check_in_bounds(self.start, self.stop), (
-                f"{o.name} not inside {self.name}"
-            )
+            assert o.check_in_bounds(
+                self.start, self.stop
+            ), f"{o.name} not inside {self.name}"
 
     @overload
     def force(
@@ -586,9 +589,9 @@ class CircularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
-            "supplied coordinates not at location of aperture"
-        )
+        assert np.allclose(
+            stop.z, self.z
+        ), "supplied coordinates not at location of aperture"
         return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r**2
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
@@ -632,9 +635,9 @@ class RectangularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
-            "supplied coordinates not at location of aperture"
-        )
+        assert np.allclose(
+            stop.z, self.z
+        ), "supplied coordinates not at location of aperture"
         return (np.abs((stop.x - self.x)) <= self.wx / 2) & (
             np.abs((stop.y - self.y)) <= self.wy / 2
         )
@@ -689,9 +692,9 @@ class RectangularApertureFinite(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
-            "supplied coordinates not at location of aperture"
-        )
+        assert np.allclose(
+            stop.z, self.z
+        ), "supplied coordinates not at location of aperture"
         inside_aperture = (np.abs((stop.x - self.x)) <= self.wx / 2) & (
             np.abs((stop.y - self.y)) <= self.wy / 2
         )
@@ -797,8 +800,14 @@ class Bore(BeamlineObject):
     length: float
     radius: float
 
-    def check_in_bounds(self, start: float, stop: float) -> bool:
-        return self.z >= start and self.z + self.length <= stop
+    def __post_init__(self):
+        self.z_stop = self.z + self.length
+
+    def check_in_bounds(self, start: float, stop: float, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> bool:
+        return (
+            (math.isclose(self.z, start, rel_tol=rel_tol, abs_tol=abs_tol) or self.z > start) and
+            (math.isclose(self.z + self.length, stop, rel_tol=rel_tol, abs_tol=abs_tol) or self.z + self.length < stop)
+        )
 
     def get_acceptance(
         self,
@@ -817,7 +826,7 @@ class Bore(BeamlineObject):
         r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
         # z_factor for checking if z coordinates are within electrodes
-        z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
+        z_factor = int(~bounds_check_tolerance(z, self.z, self.z + self.length))
 
         return (r - self.radius) + z_factor
 
@@ -829,33 +838,36 @@ class Bore(BeamlineObject):
         acceleration: Acceleration,
         w: tuple[float, float, float],
         trap_center: tuple[float, float],
+    ) -> (
+        Tuple[np.ndarray[Any, np.dtype[Any]]]
+        | Tuple[np.ndarray[Any, np.dtype[Any]] | Coordinates | Velocities]
     ):
         assert w[2] == 0
-        assert w[0] == w[1]
+        assert w[0] == w[1], "isotropic case requires w=(ω,ω,0) with ω>0"
 
-        x0, y0, z0 = map(np.asarray, (start.x, start.y, start.z))
-        vx0, vy0, vz0 = map(np.asarray, (vels.vx, vels.vy, vels.vz))
-        z_goal = np.asarray(stop.z) if np.ndim(stop.z) else np.full_like(z0, stop.z)
+        # --- bulk arrays ----------------------------------------------------
+        x0, y0, z0    = map(np.asarray, (start.x, start.y, start.z))
+        vx0, vy0, vz0 = map(np.asarray, (vels.vx,  vels.vy,  vels.vz))
+        z_goal        = np.asarray(stop.z) if np.ndim(stop.z) else np.full_like(z0, stop.z)
 
-        N = x0.size
-        ω = w[0]
-        if not np.allclose(w[0], w[1]) or ω <= 0.0:
-            raise ValueError("isotropic case requires w=(ω,ω,0) with ω>0")
+        N  = x0.size
+        ω  = w[0]
+        if not np.allclose(w[0], w[1]) or ω <= 0 or w[2] != 0:
+            raise ValueError("Need isotropic trap: w = (ω,ω,0) with ω>0.")
 
-        # ► cylinder axis (scalar → broadcast)
+        # --- geometry -------------------------------------------------------
         cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N, self.x)
         cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N, self.y)
 
-        # ► trap (spring) centre from argument
         sx, sy = trap_center
         sx = np.asarray(sx) if np.ndim(sx) else np.full(N, sx)
         sy = np.asarray(sy) if np.ndim(sy) else np.full(N, sy)
 
-        # static shift due to constant acceleration
+        # static shift caused by constant force
         ox = sx + acceleration.ax / ω**2
         oy = sy + acceleration.ay / ω**2
 
-        # bring motion into cylinder-centred frame
+        # move to cylinder-centred coords
         Cx = ox - cx
         Cy = oy - cy
         Ax = x0 - ox
@@ -863,85 +875,94 @@ class Bore(BeamlineObject):
         Bx = vx0 / ω
         By = vy0 / ω
 
-        R2 = self.radius**2
+        R2 = self.radius ** 2
         az = acceleration.az
 
-        # ═════════════════════════════════════════════════════════════════════
-        # 1) z-window  (solve quadratic / linear for each trajectory)
-        # ═════════════════════════════════════════════════════════════════════
+        # ====================================================================
+        # 1)    time window (z-motion)
+        # ====================================================================
         dz = z_goal - z0
-        if abs(az) < 1e-14:
+        if abs(az) < 1e-14:                               # ballistic
             with np.errstate(divide="ignore", invalid="ignore"):
                 t_end = dz / vz0
-        else:
-            a, b, c = 0.5 * az, vz0, -dz
-            disc = b * b - 4 * a * c
+        else:                                             # quadratic
+            a, b, c = 0.5*az, vz0, -dz
+            disc    = b*b - 4*a*c
             disc[disc < 0] = 0
-            srt = np.sqrt(disc)
-            t1, t2 = (-b - srt) / (2 * a), (-b + srt) / (2 * a)
-            t_end = np.where(dz >= 0, np.maximum(t1, t2), np.minimum(t1, t2))
+            rt      = np.sqrt(disc)
+            t1, t2  = (-b - rt)/(2*a), (-b + rt)/(2*a)
+            t_end   = np.where(dz >= 0, np.maximum(t1, t2),
+                                        np.minimum(t1, t2))
         valid = (t_end > 0) & np.isfinite(t_end)
 
-        # allocate outputs
+        # ------------------------------------------------ result arrays -----
         hit = np.zeros(N, bool)
         t_hit = np.full(N, np.nan)
-        x_hit = np.full(N, np.nan)
-        y_hit = np.full(N, np.nan)
-        z_hit = np.full(N, np.nan)
+        x_hit = np.full(N, np.nan);  y_hit = np.full(N, np.nan);  z_hit = np.full(N, np.nan)
+        vx_hit = np.full(N, np.nan); vy_hit = np.full(N, np.nan); vz_hit = np.full(N, np.nan)
 
-        if not valid.any():
-            return hit, t_hit, x_hit, y_hit, z_hit
+        if not valid.any():                       # nothing moves forward
+            return hit, t_hit, Coordinates(x_hit, y_hit, z_hit), Velocities(vx_hit, vy_hit, vz_hit)
 
         survivors = np.where(valid)[0]
 
-        # ═════════════════════════════════════════════════════════════════════
-        # 2) analytic first-hit for each survivor  (quartic → roots)
-        # ═════════════════════════════════════════════════════════════════════
+        # ====================================================================
+        # 2)    analytic first hit
+        # ====================================================================
         for i in survivors:
-            # coefficients of  r²(θ) = (Cx + Ax cosθ + Bx sinθ)² + (Cy + …)² − R²
-            a = Bx[i] * Cy[i] + By[i] * Cx[i] + Ax[i] * By[i] + Ay[i] * Bx[i]
-            b = (
-                Ax[i] * Cx[i]
-                + Ay[i] * Cy[i]
-                + 0.5 * (Ax[i] ** 2 + Ay[i] ** 2 - Bx[i] ** 2 - By[i] ** 2)
-                + Cx[i] ** 2
-                + Cy[i] ** 2
-                - R2
-            )
-            c = Ax[i] * By[i] + Ay[i] * Bx[i]
-            d = 0.5 * (Ax[i] ** 2 + Ay[i] ** 2 - Bx[i] ** 2 - By[i] ** 2)
-            e = Cx[i] * Ax[i] + Cy[i] * Ay[i]
+            # ---  quick analytic upper bound ---------------------------------
+            centre_dist = math.hypot(Cx[i], Cy[i])
+            amp2        = Ax[i]**2 + Bx[i]**2 + Ay[i]**2 + By[i]**2
+            if centre_dist + math.sqrt(amp2) < self.radius - 1e-9:
+                continue                       # ellipse never touches the wall
 
-            # quartic  Au⁴+Bu³+Cu²+Du+E = 0  with  u = tan(θ/2)
-            A4 = d + b
-            A3 = 2 * (c + a)
-            A2 = 2 * b + 6 * R2 - 6 * (Cx[i] ** 2 + Cy[i] ** 2)
-            A1 = 2 * (c - a)
-            A0 = d - b
+            # ---  quartic coefficients  (unchanged) ---------------------------
+            a =  Bx[i]*Cy[i] + By[i]*Cx[i] + Ax[i]*By[i] + Ay[i]*Bx[i]
+            b =  Ax[i]*Cx[i] + Ay[i]*Cy[i] + 0.5*(Ax[i]**2 + Ay[i]**2
+                                                - Bx[i]**2 - By[i]**2)\
+                + Cx[i]**2 + Cy[i]**2 - R2
+            c =  Ax[i]*By[i] + Ay[i]*Bx[i]
+            d = 0.5*(Ax[i]**2 + Ay[i]**2 - Bx[i]**2 - By[i]**2)
 
-            roots = np.roots([A4, A3, A2, A1, A0])
-            roots = roots.real[np.abs(roots.imag) < 1e-9]
-            if roots.size == 0:
+            A4, A3 = d + b, 2*(c + a)
+            A2 = 2*b + 6*R2 - 6*(Cx[i]**2 + Cy[i]**2)
+            A1, A0 = 2*(c - a), d - b
+
+            u = np.roots([A4, A3, A2, A1, A0]).real
+            u = u[np.abs(np.imag(u)) < 1e-8]        # keep nearly-real roots
+            if u.size == 0:
                 continue
 
-            θ = 2 * np.arctan(roots)
-            θ = (θ + 2 * np.pi) % (2 * np.pi)  # to [0,2π)
+            θ = (2*np.arctan(u) + 2*np.pi) % (2*np.pi)
             t_cand = θ / ω
             t_cand = t_cand[(t_cand > 0) & (t_cand <= t_end[i])]
             if t_cand.size == 0:
                 continue
 
-            t_first = float(np.min(t_cand))
-            Cθ, Sθ = math.cos(ω * t_first), math.sin(ω * t_first)
+            t0 = float(t_cand.min())
+            Cθ, Sθ = math.cos(ω*t0), math.sin(ω*t0)
 
-            xh = cx[i] + Cx[i] + Ax[i] * Cθ + Bx[i] * Sθ
-            yh = cy[i] + Cy[i] + Ay[i] * Cθ + By[i] * Sθ
-            zh = z0[i] + vz0[i] * t_first + 0.5 * az * t_first**2
+            # position and radial check (0.1 µm tolerance)
+            x_rel = Cx[i] + Ax[i]*Cθ + Bx[i]*Sθ
+            y_rel = Cy[i] + Ay[i]*Cθ + By[i]*Sθ
+            r_now = math.hypot(x_rel, y_rel)
+            if abs(r_now - self.radius) > 1e-7:      # 0.1 µm ≈ 4 × 10⁻⁶ inch
+                continue
 
-            hit[i] = True
-            t_hit[i] = t_first
-            x_hit[i] = xh
-            y_hit[i] = yh
-            z_hit[i] = zh
+            # ---  fill outputs  ------------------------------------------------
+            hit[i]   = True
+            t_hit[i] = t0
+            x_hit[i] = cx[i] + x_rel
+            y_hit[i] = cy[i] + y_rel
+            z_hit[i] = z0[i] + vz0[i]*t0 + 0.5*az*t0**2
 
-        return hit, t_hit, x_hit, y_hit, z_hit
+            vx_hit[i] = -ω*Ax[i]*Sθ + ω*Bx[i]*Cθ
+            vy_hit[i] = -ω*Ay[i]*Sθ + ω*By[i]*Cθ
+            vz_hit[i] = vz0[i] + az*t0
+
+        return (
+            hit,
+            t_hit,
+            Coordinates(x_hit, y_hit, z_hit),
+            Velocities(vx_hit, vy_hit, vz_hit),
+        )
