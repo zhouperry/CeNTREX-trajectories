@@ -906,7 +906,7 @@ class Bore(BeamlineObject):
         r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
         # z_factor for checking if z coordinates are within electrodes
-        z_factor = int(~bounds_check_tolerance(z, self.z, self.z + self.length))
+        z_factor = int(not bounds_check_tolerance(z, self.z, self.z + self.length))
 
         return (r - self.radius) + z_factor
 
