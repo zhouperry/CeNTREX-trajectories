@@ -8,6 +8,7 @@ from typing import Any, List, Optional, Tuple, overload
 
 import numpy as np
 import numpy.typing as npt
+from scipy.optimize import brentq
 
 from .common_types import NDArray_or_Float
 from .data_structures import Acceleration, Coordinates, Force, Velocities
@@ -831,138 +832,130 @@ class Bore(BeamlineObject):
         return (r - self.radius) + z_factor
 
     def get_collisions_linear(
-        self,
-        start: Coordinates,
-        stop: Coordinates,
-        vels: Velocities,
-        acceleration: Acceleration,
-        w: tuple[float, float, float],
-        trap_center: tuple[float, float],
-    ) -> (
-        Tuple[np.ndarray[Any, np.dtype[Any]]]
-        | Tuple[np.ndarray[Any, np.dtype[Any]] | Coordinates | Velocities]
+            self,
+            start: Coordinates,
+            stop:  Coordinates,
+            vels:  Velocities,
+            acc:   Acceleration,
+            w:     tuple[float, float, float],      # (ω,ω,0)
+            trap_center: tuple[float, float],       # (sx,sy)
+            *,
+            scan_fraction: int = 8,                 # bracket step = T/scan_fraction
     ):
-        assert w[2] == 0
-        assert w[0] == w[1], "isotropic case requires w=(ω,ω,0) with ω>0"
+        """vector inputs, isotropic trap, returns hit-mask & position + velocity"""
 
-        # --- bulk arrays ----------------------------------------------------
-        x0, y0, z0    = map(np.asarray, (start.x, start.y, start.z))
-        vx0, vy0, vz0 = map(np.asarray, (vels.vx,  vels.vy,  vels.vz))
-        z_goal        = np.asarray(stop.z) if np.ndim(stop.z) else np.full_like(z0, stop.z)
+        # ---------- unpack arrays ------------------------------------------
+        x0,y0,z0    = map(np.asarray,(start.x,start.y,start.z))
+        vx0,vy0,vz0 = map(np.asarray,(vels.vx ,vels.vy ,vels.vz))
+        z_goal      = (np.asarray(stop.z)
+                    if np.ndim(stop.z) else np.full_like(z0,stop.z))
+        N           = x0.size
+        ω           = w[0]
+        if not (np.allclose(w[0],w[1]) and w[2]==0 and ω>0):
+            raise ValueError("need isotropic trap with w=(ω,ω,0) and ω>0")
 
-        N  = x0.size
-        ω  = w[0]
-        if not np.allclose(w[0], w[1]) or ω <= 0 or w[2] != 0:
-            raise ValueError("Need isotropic trap: w = (ω,ω,0) with ω>0.")
+        # cylinder axis (broadcast scalars)
+        cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N,self.x)
+        cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N,self.y)
 
-        # --- geometry -------------------------------------------------------
-        cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N, self.x)
-        cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N, self.y)
+        # spring centre
+        sx,sy = trap_center
+        sx = np.asarray(sx) if np.ndim(sx) else np.full(N,sx)
+        sy = np.asarray(sy) if np.ndim(sy) else np.full(N,sy)
 
-        sx, sy = trap_center
-        sx = np.asarray(sx) if np.ndim(sx) else np.full(N, sx)
-        sy = np.asarray(sy) if np.ndim(sy) else np.full(N, sy)
+        # static shift = trap centre + const-force offset
+        ox = sx + acc.ax/ω**2
+        oy = sy + acc.ay/ω**2
 
-        # static shift caused by constant force
-        ox = sx + acceleration.ax / ω**2
-        oy = sy + acceleration.ay / ω**2
+        # coefficients in cylinder frame   R(t)=C+ A cos + B sin
+        Cx,Cy = ox-cx , oy-cy
+        Ax,Ay = x0-ox , y0-oy
+        Bx,By = vx0/ω , vy0/ω
 
-        # move to cylinder-centred coords
-        Cx = ox - cx
-        Cy = oy - cy
-        Ax = x0 - ox
-        Ay = y0 - oy
-        Bx = vx0 / ω
-        By = vy0 / ω
+        R       = float(self.radius)
+        R2      = R*R
+        az      = acc.az
+        T       = 2*math.pi/ω         # full period
+        dt      = T/scan_fraction     # safe bracket step  (π/4ω default)
 
-        R2 = self.radius ** 2
-        az = acceleration.az
-
-        # ====================================================================
-        # 1)    time window (z-motion)
-        # ====================================================================
+        # ---------- flight time to stop.z  ---------------------------------
         dz = z_goal - z0
-        if abs(az) < 1e-14:                               # ballistic
-            with np.errstate(divide="ignore", invalid="ignore"):
+        if abs(az) < 1e-14:
+            with np.errstate(divide="ignore",invalid="ignore"):
                 t_end = dz / vz0
-        else:                                             # quadratic
-            a, b, c = 0.5*az, vz0, -dz
-            disc    = b*b - 4*a*c
-            disc[disc < 0] = 0
-            rt      = np.sqrt(disc)
-            t1, t2  = (-b - rt)/(2*a), (-b + rt)/(2*a)
-            t_end   = np.where(dz >= 0, np.maximum(t1, t2),
-                                        np.minimum(t1, t2))
-        valid = (t_end > 0) & np.isfinite(t_end)
+        else:
+            a,b,c = 0.5*az, vz0, -dz
+            disc   = b*b - 4*a*c
+            disc[disc<0] = 0
+            rt     = np.sqrt(disc)
+            t1,t2  = (-b-rt)/(2*a), (-b+rt)/(2*a)
+            t_end  = np.where(dz>=0, np.maximum(t1,t2),
+                                    np.minimum(t1,t2))
+        valid = (t_end>0)&np.isfinite(t_end)
 
-        # ------------------------------------------------ result arrays -----
-        hit = np.zeros(N, bool)
-        t_hit = np.full(N, np.nan)
-        x_hit = np.full(N, np.nan);  y_hit = np.full(N, np.nan);  z_hit = np.full(N, np.nan)
-        vx_hit = np.full(N, np.nan); vy_hit = np.full(N, np.nan); vz_hit = np.full(N, np.nan)
+        # ---------- outputs -------------------------------------------------
+        hit=np.zeros(N,bool);  t_hit=np.full(N,np.nan)
+        xh=np.full(N,np.nan);  yh=np.full(N,np.nan);  zh=np.full(N,np.nan)
+        vxh=np.full(N,np.nan); vyh=np.full(N,np.nan); vzh=np.full(N,np.nan)
 
-        if not valid.any():                       # nothing moves forward
-            return hit, t_hit, Coordinates(x_hit, y_hit, z_hit), Velocities(vx_hit, vy_hit, vz_hit)
+        if not valid.any():                        # nothing moves forward
+            return hit,t_hit,Coordinates(xh,yh,zh), Velocities(vxh,vyh,vzh)
 
         survivors = np.where(valid)[0]
 
-        # ====================================================================
-        # 2)    analytic first hit
-        # ====================================================================
+        # ===== loop over survivors =========================================
         for i in survivors:
-            # ---  quick analytic upper bound ---------------------------------
-            centre_dist = math.hypot(Cx[i], Cy[i])
-            amp2        = Ax[i]**2 + Bx[i]**2 + Ay[i]**2 + By[i]**2
-            if centre_dist + math.sqrt(amp2) < self.radius - 1e-9:
-                continue                       # ellipse never touches the wall
 
-            # ---  quartic coefficients  (unchanged) ---------------------------
-            a =  Bx[i]*Cy[i] + By[i]*Cx[i] + Ax[i]*By[i] + Ay[i]*Bx[i]
-            b =  Ax[i]*Cx[i] + Ay[i]*Cy[i] + 0.5*(Ax[i]**2 + Ay[i]**2
-                                                - Bx[i]**2 - By[i]**2)\
-                + Cx[i]**2 + Cy[i]**2 - R2
-            c =  Ax[i]*By[i] + Ay[i]*Bx[i]
-            d = 0.5*(Ax[i]**2 + Ay[i]**2 - Bx[i]**2 - By[i]**2)
+            # ----- exact peak radius (isotropic) ---------------------------
+            AA, BB, AB = Ax[i]**2+Ay[i]**2, Bx[i]**2+By[i]**2, Ax[i]*Bx[i]+Ay[i]*By[i]
+            amp = math.sqrt(0.5*(AA+BB)+0.5*math.hypot(AA-BB, 2*AB))
+            if math.hypot(Cx[i],Cy[i]) + amp < R - 1e-9:
+                continue                        # geometrically impossible
 
-            A4, A3 = d + b, 2*(c + a)
-            A2 = 2*b + 6*R2 - 6*(Cx[i]**2 + Cy[i]**2)
-            A1, A0 = 2*(c - a), d - b
+            # analytic x,y in cylinder frame
+            def xy(t):
+                Cθ,Sθ = math.cos(ω*t), math.sin(ω*t)
+                return (Cx[i] + Ax[i]*Cθ + Bx[i]*Sθ,
+                        Cy[i] + Ay[i]*Cθ + By[i]*Sθ)
 
-            u = np.roots([A4, A3, A2, A1, A0]).real
-            u = u[np.abs(np.imag(u)) < 1e-8]        # keep nearly-real roots
-            if u.size == 0:
+            def f(t: float) -> float:
+                x_rel, y_rel = xy(t)
+                return x_rel*x_rel + y_rel*y_rel - R2
+
+            # starts outside?
+            if f(0.0) > 0:
+                hit[i]=True; t_hit[i]=0.0
+                xh[i]=x0[i]; yh[i]=y0[i]; zh[i]=z0[i]
+                vxh[i]=vx0[i]; vyh[i]=vy0[i]; vzh[i]=vz0[i]
                 continue
 
-            θ = (2*np.arctan(u) + 2*np.pi) % (2*np.pi)
-            t_cand = θ / ω
-            t_cand = t_cand[(t_cand > 0) & (t_cand <= t_end[i])]
-            if t_cand.size == 0:
+            # ----- bracket first root with step dt -------------------------
+            a, fa = 0.0, 0.0
+            b     = min(float(t_end[i]), dt)
+            fb    = f(b)
+            while fb < 0 and b < t_end[i]:
+                a,fa = b,fb
+                b    = min(b+dt, t_end[i])
+                fb   = f(b)
+            if fb < 0:                           # never crosses
                 continue
 
-            t0 = float(t_cand.min())
-            Cθ, Sθ = math.cos(ω*t0), math.sin(ω*t0)
+            # ----- Brent root ----------------------------------------------
+            MAX_ITER = 60
+            t0 = brentq(
+                f, a, b,xtol=1e-12, rtol=1e-10,maxiter=MAX_ITER
+            )
 
-            # position and radial check (0.1 µm tolerance)
-            x_rel = Cx[i] + Ax[i]*Cθ + Bx[i]*Sθ
-            y_rel = Cy[i] + Ay[i]*Cθ + By[i]*Sθ
-            r_now = math.hypot(x_rel, y_rel)
-            if abs(r_now - self.radius) > 1e-7:      # 0.1 µm ≈ 4 × 10⁻⁶ inch
+            # Position & velocity at impact
+            xr, yr = xy(t0)
+            if abs(math.hypot(xr,yr)-R) > 1e-8:  # 10 nm tolerance
                 continue
 
-            # ---  fill outputs  ------------------------------------------------
-            hit[i]   = True
-            t_hit[i] = t0
-            x_hit[i] = cx[i] + x_rel
-            y_hit[i] = cy[i] + y_rel
-            z_hit[i] = z0[i] + vz0[i]*t0 + 0.5*az*t0**2
+            hit[i]=True; t_hit[i]=t0
+            xh[i]=cx[i]+xr; yh[i]=cy[i]+yr
+            zh[i]=z0[i]+vz0[i]*t0+0.5*az*t0*t0
+            vxh[i]=-ω*Ax[i]*math.sin(ω*t0)+ω*Bx[i]*math.cos(ω*t0)
+            vyh[i]=-ω*Ay[i]*math.sin(ω*t0)+ω*By[i]*math.cos(ω*t0)
+            vzh[i]= vz0[i]+az*t0
 
-            vx_hit[i] = -ω*Ax[i]*Sθ + ω*Bx[i]*Cθ
-            vy_hit[i] = -ω*Ay[i]*Sθ + ω*By[i]*Cθ
-            vz_hit[i] = vz0[i] + az*t0
-
-        return (
-            hit,
-            t_hit,
-            Coordinates(x_hit, y_hit, z_hit),
-            Velocities(vx_hit, vy_hit, vz_hit),
-        )
+        return hit, t_hit, Coordinates(xh,yh,zh), Velocities(vxh,vyh,vzh)
