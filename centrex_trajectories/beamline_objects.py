@@ -19,6 +19,7 @@ from .utils import bounds_check_tolerance
 
 __all__ = [
     "Section",
+    "LinearSection",
     "ElectrostaticQuadrupoleLens",
     "MagnetostaticHexapoleLens",
     "CircularAperture",
@@ -38,20 +39,17 @@ with open(path / "saved_data" / "stark_poly.pkl", "rb") as f:
 @dataclass
 class Section:
     """
-    Generic Section dataclass
+    Generic Section dataclass.
 
     Attributes:
-        name (str): name of section
-        objects (List): objects inside the section which particles can collide with
-        start (float): start of section in z [m]
-        stop (float): end of section in z [m]
-        save_collisions (bool): save the coordinates and velocities of collisions in
-                                this section
-        propagation_type (PropagationType): propagation type to use for integration
-        force (Optional(Force): force to use, a constant force in addition to the force
-                                that acts on the entire beamline,e.g. gravity. Could be
-                                used for constant deflection from an electric field.
-
+        name (str): Name of the section.
+        objects (List[BeamlineObject]): Objects inside the section that particles can collide with.
+        start (float): Start of the section in z [m].
+        stop (float): End of the section in z [m].
+        save_collisions (bool): Whether to save the coordinates and velocities of collisions in this section.
+        propagation_type (PropagationType): Propagation type to use for integration.
+        force (Optional[Force]): A constant force in addition to the force acting on the entire beamline (e.g., gravity).
+                                 Can be used for constant deflection from an electric field.
     """
 
     name: str
@@ -74,6 +72,17 @@ class Section:
 
 @dataclass
 class LinearSection(Section):
+    """
+    Linear Section dataclass.
+
+    Attributes:
+        x (float): x-coordinate of the section [m].
+        y (float): y-coordinate of the section [m].
+        spring_constant (tuple[float, ...]): Spring constants in x, y, and z directions [N/m].
+        propagation_type (PropagationType): Propagation type for linear motion.
+        force (Optional[Force]): A constant force acting on the section.
+    """
+
     x: float = 0.0
     y: float = 0.0
     spring_constant: tuple[float, ...] = (0.0, 0.0, 0.0)
@@ -82,6 +91,13 @@ class LinearSection(Section):
 
 
 class ODESection:
+    """
+    Base class for sections using ODE-based propagation.
+
+    Attributes:
+        propagation_type (PropagationType): Propagation type for ODE-based motion.
+    """
+
     propagation_type: PropagationType = PropagationType.ode
 
     def __init__(
@@ -110,7 +126,8 @@ class ODESection:
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -121,7 +138,8 @@ class ODESection:
         z: npt.NDArray[np.float64],
     ) -> Tuple[
         npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
-    ]: ...
+    ]:
+        ...
 
     def force(self, t, x, y, z):
         raise NotImplementedError
@@ -129,7 +147,19 @@ class ODESection:
 
 class ElectrostaticQuadrupoleLens(ODESection):
     """
-    Electrostatic Quadrupole Lens class
+    Electrostatic Quadrupole Lens class.
+
+    Attributes:
+        name (str): Name of the electrostatic quadrupole lens.
+        objects (List[Any]): Objects inside the section that particles can collide with.
+        start (float): Start of the section in z [m].
+        stop (float): End of the section in z [m].
+        V (float): Voltage on the electrodes [Volts].
+        R (float): Radius of the lens bore [m].
+        x (float): x-coordinate of the lens center [m].
+        y (float): y-coordinate of the lens center [m].
+        save_collisions (bool): Whether to save the coordinates and velocities of collisions in this section.
+        stark_potential (Optional[np.ndarray]): Polynomial coefficients of the Stark potential as a function of the electric field.
     """
 
     def __init__(
@@ -235,7 +265,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -246,7 +277,8 @@ class ElectrostaticQuadrupoleLens(ODESection):
         z: npt.NDArray[np.float64],
     ) -> Tuple[
         npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
-    ]: ...
+    ]:
+        ...
 
     def force(self, t, x, y, z):
         """
@@ -345,7 +377,19 @@ class ElectrostaticQuadrupoleLens(ODESection):
 
 class MagnetostaticHexapoleLens(ODESection):
     """
-    Magnetic Hexapole Lens class
+    Magnetic Hexapole Lens class.
+
+    Attributes:
+        name (str): Name of the magnetic hexapole lens.
+        objects (List[Any]): Objects inside the section that particles can collide with.
+        start (float): Start of the section in z [m].
+        stop (float): End of the section in z [m].
+        particle (Particle): Particle interacting with the lens.
+        Rin (float): Inner radius of the lens [m].
+        Rout (float): Outer radius of the lens [m].
+        M (int): Number of magnet sections.
+        n (int): Number of poles (e.g., n=3 for hexapole).
+        save_collisions (Optional[bool]): Whether to save the coordinates and velocities of collisions in this section.
 
     The magnetic field can be expressed as:
         Br = Bar * cos(3ϕ) * (r/Rin)**2
@@ -435,7 +479,8 @@ class MagnetostaticHexapoleLens(ODESection):
     @overload
     def force(
         self, t: float, x: float, y: float, z: float
-    ) -> Tuple[float, float, float]: ...
+    ) -> Tuple[float, float, float]:
+        ...
 
     @overload
     def force(
@@ -446,7 +491,8 @@ class MagnetostaticHexapoleLens(ODESection):
         z: npt.NDArray[np.floating],
     ) -> Tuple[
         npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]
-    ]: ...
+    ]:
+        ...
 
     def force(
         self,
@@ -525,6 +571,15 @@ class MagnetostaticHexapoleLens(ODESection):
 
 @dataclass
 class BeamlineObject:
+    """
+    Base class for beamline objects.
+
+    Attributes:
+        x (float): x-coordinate of the object [m].
+        y (float): y-coordinate of the object [m].
+        z (float): z-coordinate of the object [m].
+    """
+
     x: float
     y: float
     z: float
@@ -558,13 +613,13 @@ class BeamlineObject:
 @dataclass
 class CircularAperture(BeamlineObject):
     """
-    Circular aperture
+    Circular aperture.
 
     Attributes:
-        x (float): x coordinate [m]
-        y (float): y coordinate [m]
-        z (float): z coordinate [m]
-        r (float): radius of the aperture [m]
+        x (float): x-coordinate of the aperture center [m].
+        y (float): y-coordinate of the aperture center [m].
+        z (float): z-coordinate of the aperture center [m].
+        r (float): Radius of the aperture [m].
     """
 
     r: float
@@ -602,14 +657,14 @@ class CircularAperture(BeamlineObject):
 @dataclass
 class RectangularAperture(BeamlineObject):
     """
-    Rectangular aperture
+    Rectangular aperture.
 
     Attributes:
-        x (float): x coordinate [m]
-        y (float): y coordinate [m]
-        z (float): z coordinate [m]
-        wx (float): width of the aperture [m]
-        wy (float): height of the aperture [m]
+        x (float): x-coordinate of the aperture center [m].
+        y (float): y-coordinate of the aperture center [m].
+        z (float): z-coordinate of the aperture center [m].
+        wx (float): Width of the aperture [m].
+        wy (float): Height of the aperture [m].
     """
 
     wx: float
@@ -652,16 +707,16 @@ class RectangularAperture(BeamlineObject):
 @dataclass
 class RectangularApertureFinite(BeamlineObject):
     """
-    Rectangular aperture
+    Rectangular aperture with finite plate dimensions.
 
     Attributes:
-        x (float): x coordinate [m]
-        y (float): y coordinate [m]
-        z (float): z coordinate [m]
-        wx (float): width of the aperture [m]
-        wy (float): height of the aperture [m]
-        wxp (float): width of the plate the aperture is in [m]
-        wyp (float): height of the plate the aperure is in [m]
+        x (float): x-coordinate of the aperture center [m].
+        y (float): y-coordinate of the aperture center [m].
+        z (float): z-coordinate of the aperture center [m].
+        wx (float): Width of the aperture [m].
+        wy (float): Height of the aperture [m].
+        wxp (float): Width of the plate containing the aperture [m].
+        wyp (float): Height of the plate containing the aperture [m].
     """
 
     wx: float
@@ -716,6 +771,18 @@ class RectangularApertureFinite(BeamlineObject):
 
 @dataclass
 class PlateElectrodes(BeamlineObject):
+    """
+    Plate electrodes.
+
+    Attributes:
+        x (float): x-coordinate of the electrode center [m].
+        y (float): y-coordinate of the electrode center [m].
+        z (float): z-coordinate of the electrode center [m].
+        length (float): Length of the electrode [m].
+        width (float): Width of the electrode [m].
+        separation (float): Separation between the electrodes [m].
+    """
+
     x: float
     y: float
     z: float
@@ -795,14 +862,26 @@ class PlateElectrodes(BeamlineObject):
 
 @dataclass
 class Bore(BeamlineObject):
+    """
+    Cylindrical bore.
+
+    Attributes:
+        x (float): x-coordinate of the bore center [m].
+        y (float): y-coordinate of the bore center [m].
+        z (float): z-coordinate of the bore start [m].
+        length (float): Length of the bore [m].
+        radius (float): Radius of the bore [m].
+    """
+
     x: float
     y: float
     z: float
     length: float
     radius: float
 
-    def __post_init__(self):
-        self.z_stop = self.z + self.length
+    @property
+    def z_stop(self) -> float:
+        return self.z + self.length
 
     def check_in_bounds(self, start: float, stop: float, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> bool:
         return (

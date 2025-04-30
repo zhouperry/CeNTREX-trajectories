@@ -31,22 +31,28 @@ def fit_stark_potential(
     )
     return fit.coef
 
-def bounds_check_tolerance(x: float, xmin: float, xmax: float, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> bool:
+def bounds_check_tolerance(
+    x: float,
+    xmin: float,
+    xmax: float,
+    rel_tol: float = 1e-9,
+    abs_tol: float = 0.0
+) -> bool:
     """
-    Check if x is within the bounds [xmin, xmax] with a relative tolerance.
+    Check if x is within the bounds [xmin, xmax] with a relative or absolute tolerance.
 
     Args:
-        x (float): value to check
-        xmin (float): minimum bound
-        xmax (float): maximum bound
-        rel_tol (float, optional): relative tolerance. Defaults to 1e-9.
-        abs_tol (float, optional): absolute tolerance. Defaults to 0.0.
+        x (float): Value to check.
+        xmin (float): Minimum bound.
+        xmax (float): Maximum bound.
+        rel_tol (float, optional): Relative tolerance. Defaults to 1e-9.
+        abs_tol (float, optional): Absolute tolerance. Defaults to 0.0.
 
     Returns:
-        bool: True if x is within the bounds, False otherwise
+        bool: True if x is within the bounds, False otherwise.
     """
     return (
+        xmin <= x <= xmax or
         math.isclose(x, xmin, rel_tol=rel_tol, abs_tol=abs_tol) or
-        math.isclose(x, xmax, rel_tol=rel_tol, abs_tol=abs_tol) or
-        (x > xmin and x < xmax)
+        math.isclose(x, xmax, rel_tol=rel_tol, abs_tol=abs_tol)
     )
