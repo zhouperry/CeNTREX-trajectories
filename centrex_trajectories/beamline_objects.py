@@ -39,17 +39,16 @@ with open(path / "saved_data" / "stark_poly.pkl", "rb") as f:
 @dataclass
 class Section:
     """
-    Generic Section dataclass.
+    Represents a generic section of the beamline.
 
     Attributes:
         name (str): Name of the section.
-        objects (List[BeamlineObject]): Objects inside the section that particles can collide with.
-        start (float): Start of the section in z [m].
-        stop (float): End of the section in z [m].
-        save_collisions (bool): Whether to save the coordinates and velocities of collisions in this section.
-        propagation_type (PropagationType): Propagation type to use for integration.
-        force (Optional[Force]): A constant force in addition to the force acting on the entire beamline (e.g., gravity).
-                                 Can be used for constant deflection from an electric field.
+        objects (List[BeamlineObject]): List of objects within the section that particles can interact with.
+        start (float): Start position of the section along the z-axis [m].
+        stop (float): End position of the section along the z-axis [m].
+        save_collisions (bool): Whether to save collision data (coordinates and velocities) for this section.
+        propagation_type (PropagationType): Type of propagation used for particle motion in this section.
+        force (Optional[Force]): Additional constant force acting on particles in this section (e.g., gravity or electric field).
     """
 
     name: str
@@ -95,7 +94,12 @@ class ODESection:
     Base class for sections using ODE-based propagation.
 
     Attributes:
-        propagation_type (PropagationType): Propagation type for ODE-based motion.
+        propagation_type (PropagationType): Type of propagation for ODE-based motion.
+        name (str): Name of the section.
+        objects (List[BeamlineObject]): List of objects within the section that particles can interact with.
+        start (float): Start position of the section along the z-axis [m].
+        stop (float): End position of the section along the z-axis [m].
+        save_collisions (bool): Whether to save collision data (coordinates and velocities) for this section.
     """
 
     propagation_type: PropagationType = PropagationType.ode
@@ -147,18 +151,18 @@ class ODESection:
 
 class ElectrostaticQuadrupoleLens(ODESection):
     """
-    Electrostatic Quadrupole Lens class.
+    Represents an electrostatic quadrupole lens.
 
     Attributes:
-        name (str): Name of the electrostatic quadrupole lens.
-        objects (List[Any]): Objects inside the section that particles can collide with.
-        start (float): Start of the section in z [m].
-        stop (float): End of the section in z [m].
-        V (float): Voltage on the electrodes [Volts].
+        name (str): Name of the lens.
+        objects (List[Any]): List of objects within the lens that particles can interact with.
+        start (float): Start position of the lens along the z-axis [m].
+        stop (float): End position of the lens along the z-axis [m].
+        V (float): Voltage applied to the electrodes [Volts].
         R (float): Radius of the lens bore [m].
         x (float): x-coordinate of the lens center [m].
         y (float): y-coordinate of the lens center [m].
-        save_collisions (bool): Whether to save the coordinates and velocities of collisions in this section.
+        save_collisions (bool): Whether to save collision data (coordinates and velocities) for this lens.
         stark_potential (Optional[np.ndarray]): Polynomial coefficients of the Stark potential as a function of the electric field.
     """
 
@@ -572,7 +576,7 @@ class MagnetostaticHexapoleLens(ODESection):
 @dataclass
 class BeamlineObject:
     """
-    Base class for beamline objects.
+    Base class for objects within the beamline.
 
     Attributes:
         x (float): x-coordinate of the object [m].
@@ -613,7 +617,7 @@ class BeamlineObject:
 @dataclass
 class CircularAperture(BeamlineObject):
     """
-    Circular aperture.
+    Represents a circular aperture.
 
     Attributes:
         x (float): x-coordinate of the aperture center [m].
@@ -657,14 +661,14 @@ class CircularAperture(BeamlineObject):
 @dataclass
 class RectangularAperture(BeamlineObject):
     """
-    Rectangular aperture.
+    Represents a rectangular aperture.
 
     Attributes:
         x (float): x-coordinate of the aperture center [m].
         y (float): y-coordinate of the aperture center [m].
         z (float): z-coordinate of the aperture center [m].
-        wx (float): Width of the aperture [m].
-        wy (float): Height of the aperture [m].
+        wx (float): Width of the aperture along the x-axis [m].
+        wy (float): Height of the aperture along the y-axis [m].
     """
 
     wx: float
@@ -707,14 +711,14 @@ class RectangularAperture(BeamlineObject):
 @dataclass
 class RectangularApertureFinite(BeamlineObject):
     """
-    Rectangular aperture with finite plate dimensions.
+    Represents a rectangular aperture with finite plate dimensions.
 
     Attributes:
         x (float): x-coordinate of the aperture center [m].
         y (float): y-coordinate of the aperture center [m].
         z (float): z-coordinate of the aperture center [m].
-        wx (float): Width of the aperture [m].
-        wy (float): Height of the aperture [m].
+        wx (float): Width of the aperture along the x-axis [m].
+        wy (float): Height of the aperture along the y-axis [m].
         wxp (float): Width of the plate containing the aperture [m].
         wyp (float): Height of the plate containing the aperture [m].
     """
@@ -772,15 +776,15 @@ class RectangularApertureFinite(BeamlineObject):
 @dataclass
 class PlateElectrodes(BeamlineObject):
     """
-    Plate electrodes.
+    Represents a pair of plate electrodes.
 
     Attributes:
         x (float): x-coordinate of the electrode center [m].
         y (float): y-coordinate of the electrode center [m].
         z (float): z-coordinate of the electrode center [m].
-        length (float): Length of the electrode [m].
-        width (float): Width of the electrode [m].
-        separation (float): Separation between the electrodes [m].
+        length (float): Length of the electrodes along the z-axis [m].
+        width (float): Width of the electrodes along the y-axis [m].
+        separation (float): Separation distance between the electrodes [m].
     """
 
     x: float
@@ -791,7 +795,7 @@ class PlateElectrodes(BeamlineObject):
     separation: float
 
     @property
-    def z_stop(self):
+    def z_stop(self) -> float:
         return self.z + self.length
 
     def check_in_bounds(self, start: float, stop: float) -> bool:
@@ -869,7 +873,7 @@ class Bore(BeamlineObject):
         x (float): x-coordinate of the bore center [m].
         y (float): y-coordinate of the bore center [m].
         z (float): z-coordinate of the bore start [m].
-        length (float): Length of the bore [m].
+        length (float): Length of the bore along the z-axis [m].
         radius (float): Radius of the bore [m].
     """
 
@@ -881,9 +885,27 @@ class Bore(BeamlineObject):
 
     @property
     def z_stop(self) -> float:
+        """
+        Calculate the z-coordinate of the bore's end.
+
+        Returns:
+            float: z-coordinate of the bore's end [m].
+        """
         return self.z + self.length
 
     def check_in_bounds(self, start: float, stop: float, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> bool:
+        """
+        Check if the bore is within the specified z-coordinate bounds.
+
+        Args:
+            start (float): Start coordinate in z [m].
+            stop (float): Stop coordinate in z [m].
+            rel_tol (float): Relative tolerance for boundary checks.
+            abs_tol (float): Absolute tolerance for boundary checks.
+
+        Returns:
+            bool: True if the bore is within bounds, False otherwise.
+        """
         return (
             (math.isclose(self.z, start, rel_tol=rel_tol, abs_tol=abs_tol) or self.z > start) and
             (math.isclose(self.z + self.length, stop, rel_tol=rel_tol, abs_tol=abs_tol) or self.z + self.length < stop)
@@ -896,6 +918,18 @@ class Bore(BeamlineObject):
         vels: Velocities,
         acceleration: Acceleration,
     ) -> npt.NDArray[np.bool_]:
+        """
+        Determine which particles pass through the bore without collision.
+
+        Args:
+            start (Coordinates): Start coordinates of the particles.
+            stop (Coordinates): Stop coordinates of the particles.
+            vels (Velocities): Velocities of the particles.
+            acceleration (Acceleration): Acceleration acting on the particles.
+
+        Returns:
+            npt.NDArray[np.bool_]: Boolean array indicating particle acceptance.
+        """
         mask_z = (stop.z >= self.z) & (stop.z <= self.z + self.length)
         mask_r = ((stop.x - self.x) ** 2 + (stop.y - self.y) ** 2) > self.radius**2
         accept_array = np.ones(stop.x.shape, dtype=np.bool_)
@@ -903,9 +937,20 @@ class Bore(BeamlineObject):
         return accept_array
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
+        """
+        Calculate the collision event function for a particle.
+
+        Args:
+            x (float): x-coordinate of the particle [m].
+            y (float): y-coordinate of the particle [m].
+            z (float): z-coordinate of the particle [m].
+
+        Returns:
+            float: Value of the collision event function.
+        """
         r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
-        # z_factor for checking if z coordinates are within electrodes
+        # z_factor for checking if z coordinates are within the bore
         z_factor = int(not bounds_check_tolerance(z, self.z, self.z + self.length))
 
         return (r - self.radius) + z_factor
@@ -913,72 +958,99 @@ class Bore(BeamlineObject):
     def get_collisions_linear(
             self,
             start: Coordinates,
-            stop:  Coordinates,
-            vels:  Velocities,
-            acc:   Acceleration,
-            w:     tuple[float, float, float],      # (ω,ω,0)
-            trap_center: tuple[float, float],       # (sx,sy)
+            stop: Coordinates,
+            vels: Velocities,
+            acc: Acceleration,
+            w: Tuple[float, float, float],      # (ω,ω,0)
+            trap_center: Tuple[float, float],  # (sx,sy)
             *,
-            scan_fraction: int = 8,                 # bracket step = T/scan_fraction
-    ):
-        """vector inputs, isotropic trap, returns hit-mask & position + velocity"""
+            scan_fraction: int = 8,            # bracket step = T/scan_fraction
+    ) -> Tuple[
+        npt.NDArray[np.bool_],
+        npt.NDArray[np.float64],
+        Coordinates,
+        Velocities
+    ]:
+        """
+        Calculate collisions for particles moving linearly through the bore.
 
+        Args:
+            start (Coordinates): Start coordinates of the particles.
+            stop (Coordinates): Stop coordinates of the particles.
+            vels (Velocities): Velocities of the particles.
+            acc (Acceleration): Acceleration acting on the particles.
+            w (Tuple[float, float, float]): Angular frequencies (ω, ω, 0).
+            trap_center (Tuple[float, float]): Center of the trap (sx, sy).
+            scan_fraction (int, optional): Fraction of the period for bracketing steps. Defaults to 8.
+
+        Returns:
+            Tuple[npt.NDArray[np.bool_], npt.NDArray[np.float64], Coordinates, Velocities]:
+                - Boolean array indicating collisions.
+                - Array of collision times.
+                - Coordinates of collisions.
+                - Velocities at collisions.
+        """
         # ---------- unpack arrays ------------------------------------------
-        x0,y0,z0    = map(np.asarray,(start.x,start.y,start.z))
-        vx0,vy0,vz0 = map(np.asarray,(vels.vx ,vels.vy ,vels.vz))
-        z_goal      = (np.asarray(stop.z)
-                    if np.ndim(stop.z) else np.full_like(z0,stop.z))
-        N           = x0.size
-        ω           = w[0]
-        if not (np.allclose(w[0],w[1]) and w[2]==0 and ω>0):
+        x0, y0, z0 = map(np.asarray, (start.x, start.y, start.z))
+        vx0, vy0, vz0 = map(np.asarray, (vels.vx, vels.vy, vels.vz))
+        z_goal = (np.asarray(stop.z)
+                  if np.ndim(stop.z) else np.full_like(z0, stop.z))
+        N = x0.size
+        ω = w[0]
+        if not (np.allclose(w[0], w[1]) and w[2] == 0 and ω > 0):
             raise ValueError("need isotropic trap with w=(ω,ω,0) and ω>0")
 
         # cylinder axis (broadcast scalars)
-        cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N,self.x)
-        cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N,self.y)
+        cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N, self.x)
+        cy = np.asarray(self.y) if np.ndim(self.y) else np.full(N, self.y)
 
         # spring centre
-        sx,sy = trap_center
-        sx = np.asarray(sx) if np.ndim(sx) else np.full(N,sx)
-        sy = np.asarray(sy) if np.ndim(sy) else np.full(N,sy)
+        sx, sy = trap_center
+        sx = np.asarray(sx) if np.ndim(sx) else np.full(N, sx)
+        sy = np.asarray(sy) if np.ndim(sy) else np.full(N, sy)
 
         # static shift = trap centre + const-force offset
-        ox = sx + acc.ax/ω**2
-        oy = sy + acc.ay/ω**2
+        ox = sx + acc.ax / ω**2
+        oy = sy + acc.ay / ω**2
 
         # coefficients in cylinder frame   R(t)=C+ A cos + B sin
-        Cx,Cy = ox-cx , oy-cy
-        Ax,Ay = x0-ox , y0-oy
-        Bx,By = vx0/ω , vy0/ω
+        Cx, Cy = ox - cx, oy - cy
+        Ax, Ay = x0 - ox, y0 - oy
+        Bx, By = vx0 / ω, vy0 / ω
 
-        R       = float(self.radius)
-        R2      = R*R
-        az      = acc.az
-        T       = 2*math.pi/ω         # full period
-        dt      = T/scan_fraction     # safe bracket step  (π/4ω default)
+        R = float(self.radius)
+        R2 = R * R
+        az = acc.az
+        T = 2 * math.pi / ω         # full period
+        dt = T / scan_fraction      # safe bracket step  (π/4ω default)
 
         # ---------- flight time to stop.z  ---------------------------------
         dz = z_goal - z0
         if abs(az) < 1e-14:
-            with np.errstate(divide="ignore",invalid="ignore"):
+            with np.errstate(divide="ignore", invalid="ignore"):
                 t_end = dz / vz0
         else:
-            a,b,c = 0.5*az, vz0, -dz
-            disc   = b*b - 4*a*c
-            disc[disc<0] = 0
-            rt     = np.sqrt(disc)
-            t1,t2  = (-b-rt)/(2*a), (-b+rt)/(2*a)
-            t_end  = np.where(dz>=0, np.maximum(t1,t2),
-                                    np.minimum(t1,t2))
-        valid = (t_end>0)&np.isfinite(t_end)
+            a, b, c = 0.5 * az, vz0, -dz
+            disc = b * b - 4 * a * c
+            disc[disc < 0] = 0
+            rt = np.sqrt(disc)
+            t1, t2 = (-b - rt) / (2 * a), (-b + rt) / (2 * a)
+            t_end = np.where(dz >= 0, np.maximum(t1, t2),
+                             np.minimum(t1, t2))
+        valid = (t_end > 0) & np.isfinite(t_end)
 
         # ---------- outputs -------------------------------------------------
-        hit=np.zeros(N,bool);  t_hit=np.full(N,np.nan)
-        xh=np.full(N,np.nan);  yh=np.full(N,np.nan);  zh=np.full(N,np.nan)
-        vxh=np.full(N,np.nan); vyh=np.full(N,np.nan); vzh=np.full(N,np.nan)
+        hit = np.zeros(N, bool)
+        t_hit = np.full(N, np.nan)
+        xh = np.full(N, np.nan)
+        yh = np.full(N, np.nan)
+        zh = np.full(N, np.nan)
+        vxh = np.full(N, np.nan)
+        vyh = np.full(N, np.nan)
+        vzh = np.full(N, np.nan)
 
         if not valid.any():                        # nothing moves forward
-            return hit,t_hit,Coordinates(xh,yh,zh), Velocities(vxh,vyh,vzh)
+            return hit, t_hit, Coordinates(xh, yh, zh), Velocities(vxh, vyh, vzh)
 
         survivors = np.where(valid)[0]
 
@@ -986,55 +1058,62 @@ class Bore(BeamlineObject):
         for i in survivors:
 
             # ----- exact peak radius (isotropic) ---------------------------
-            AA, BB, AB = Ax[i]**2+Ay[i]**2, Bx[i]**2+By[i]**2, Ax[i]*Bx[i]+Ay[i]*By[i]
-            amp = math.sqrt(0.5*(AA+BB)+0.5*math.hypot(AA-BB, 2*AB))
-            if math.hypot(Cx[i],Cy[i]) + amp < R - 1e-9:
+            AA, BB, AB = Ax[i]**2 + Ay[i]**2, Bx[i]**2 + By[i]**2, Ax[i] * Bx[i] + Ay[i] * By[i]
+            amp = math.sqrt(0.5 * (AA + BB) + 0.5 * math.hypot(AA - BB, 2 * AB))
+            if math.hypot(Cx[i], Cy[i]) + amp < R - 1e-9:
                 continue                        # geometrically impossible
 
             # analytic x,y in cylinder frame
             def xy(t):
-                Cθ,Sθ = math.cos(ω*t), math.sin(ω*t)
-                return (Cx[i] + Ax[i]*Cθ + Bx[i]*Sθ,
-                        Cy[i] + Ay[i]*Cθ + By[i]*Sθ)
+                Cθ, Sθ = math.cos(ω * t), math.sin(ω * t)
+                return (Cx[i] + Ax[i] * Cθ + Bx[i] * Sθ,
+                        Cy[i] + Ay[i] * Cθ + By[i] * Sθ)
 
             def f(t: float) -> float:
                 x_rel, y_rel = xy(t)
-                return x_rel*x_rel + y_rel*y_rel - R2
+                return x_rel * x_rel + y_rel * y_rel - R2
 
             # starts outside?
             if f(0.0) > 0:
-                hit[i]=True; t_hit[i]=0.0
-                xh[i]=x0[i]; yh[i]=y0[i]; zh[i]=z0[i]
-                vxh[i]=vx0[i]; vyh[i]=vy0[i]; vzh[i]=vz0[i]
+                hit[i] = True
+                t_hit[i] = 0.0
+                xh[i] = x0[i]
+                yh[i] = y0[i]
+                zh[i] = z0[i]
+                vxh[i] = vx0[i]
+                vyh[i] = vy0[i]
+                vzh[i] = vz0[i]
                 continue
 
             # ----- bracket first root with step dt -------------------------
             a, fa = 0.0, 0.0
-            b     = min(float(t_end[i]), dt)
-            fb    = f(b)
+            b = min(float(t_end[i]), dt)
+            fb = f(b)
             while fb < 0 and b < t_end[i]:
-                a,fa = b,fb
-                b    = min(b+dt, t_end[i])
-                fb   = f(b)
+                a, fa = b, fb
+                b = min(b + dt, t_end[i])
+                fb = f(b)
             if fb < 0:                           # never crosses
                 continue
 
             # ----- Brent root ----------------------------------------------
             MAX_ITER = 60
             t0 = brentq(
-                f, a, b,xtol=1e-12, rtol=1e-10,maxiter=MAX_ITER
+                f, a, b, xtol=1e-12, rtol=1e-10, maxiter=MAX_ITER
             )
 
             # Position & velocity at impact
             xr, yr = xy(t0)
-            if abs(math.hypot(xr,yr)-R) > 1e-8:  # 10 nm tolerance
+            if abs(math.hypot(xr, yr) - R) > 1e-8:  # 10 nm tolerance
                 continue
 
-            hit[i]=True; t_hit[i]=t0
-            xh[i]=cx[i]+xr; yh[i]=cy[i]+yr
-            zh[i]=z0[i]+vz0[i]*t0+0.5*az*t0*t0
-            vxh[i]=-ω*Ax[i]*math.sin(ω*t0)+ω*Bx[i]*math.cos(ω*t0)
-            vyh[i]=-ω*Ay[i]*math.sin(ω*t0)+ω*By[i]*math.cos(ω*t0)
-            vzh[i]= vz0[i]+az*t0
+            hit[i] = True
+            t_hit[i] = t0
+            xh[i] = cx[i] + xr
+            yh[i] = cy[i] + yr
+            zh[i] = z0[i] + vz0[i] * t0 + 0.5 * az * t0 * t0
+            vxh[i] = -ω * Ax[i] * math.sin(ω * t0) + ω * Bx[i] * math.cos(ω * t0)
+            vyh[i] = -ω * Ay[i] * math.sin(ω * t0) + ω * By[i] * math.cos(ω * t0)
+            vzh[i] = vz0[i] + az * t0
 
-        return hit, t_hit, Coordinates(xh,yh,zh), Velocities(vxh,vyh,vzh)
+        return hit, t_hit, Coordinates(xh, yh, zh), Velocities(vxh, vyh, vzh)
