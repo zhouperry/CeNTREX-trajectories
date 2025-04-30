@@ -818,50 +818,61 @@ class PlateElectrodes(BeamlineObject):
         vels: Velocities,
         acceleration: Acceleration,
     ) -> Tuple[npt.NDArray[np.bool_], Coordinates, Velocities]:
-        t = np.zeros(start.x.shape)
+        """
+        Calculate collisions with the plate electrodes.
 
+        Args:
+            start (Coordinates): Start coordinates of the particles.
+            stop (Coordinates): Stop coordinates of the particles.
+            vels (Velocities): Velocities of the particles.
+            acceleration (Acceleration): Acceleration acting on the particles.
+
+        Returns:
+            Tuple[npt.NDArray[np.bool_], Coordinates, Velocities]:
+                - Boolean array indicating collisions.
+                - Coordinates of collisions.
+                - Velocities at collisions.
+        """
+        # Calculate time to reach the plates
         dx_upper = (self.x + self.separation / 2) - start.x
-        dy_upper = (self.x - self.separation / 2) - start.x
+        dx_lower = (self.x - self.separation / 2) - start.x
 
-        m_inside = (start.x > (self.x - self.separation / 2)) & (
-            start.x < (self.x + self.separation / 2)
-        )
-        m_below = start.x < (self.x - self.separation / 2)
-        m_above = start.x > (self.x + self.separation / 2)
-        m_vpos = vels.vx > 0
-        m_vneg = vels.vx < 0
+        # Determine collision times
+        t_upper = calculate_time_ballistic(dx_upper, vels.vx, acceleration.ax)
+        t_lower = calculate_time_ballistic(dx_lower, vels.vx, acceleration.ax)
 
-        m = m_inside & m_vpos
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], acceleration.ax)
-
-        m = m_inside & m_vneg
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], acceleration.ax)
-
-        m = m_below & m_vpos
-        t[m] = calculate_time_ballistic(dy_upper[m], vels.vx[m], acceleration.ax)
-
-        m = m_above & m_vneg
-        t[m] = calculate_time_ballistic(dx_upper[m], vels.vx[m], acceleration.ax)
-
+        # Propagate positions and velocities
+        t = np.where(vels.vx > 0, t_upper, t_lower)
         x, v = propagate_ballistic(t, start, vels, acceleration)
-        m = x.z <= (self.z + self.length)
-        m &= x.z >= self.z
-        m &= np.abs(x.y - self.y) <= self.width / 2
-        return m, x.get_masked(m), v.get_masked(m)
+
+        # Check if collisions occur within the plate bounds
+        mask = (self.z <= x.z) & (x.z <= self.z + self.length)
+        mask &= abs(x.y - self.y) <= self.width / 2
+
+        return mask, x.get_masked(mask), v.get_masked(mask)
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
-        # for now assume electrode plates in y direction
+        """
+        Calculate the collision event function for a particle.
 
-        # z_factor for checking if z coordinates are within electrodes
-        z_factor = 0 if (z >= self.z and z <= self.z + self.length) else 1
+        Args:
+            x (float): x-coordinate of the particle [m].
+            y (float): y-coordinate of the particle [m].
+            z (float): z-coordinate of the particle [m].
 
-        # y_factor for checking if z coordinates are within electrodes
-        x_factor = (
-            0
-            if (x >= self.x - self.separation / 2 and x <= self.x + self.separation / 2)
-            else 1
-        )
-        return (x - self.x) + x_factor + z_factor
+        Returns:
+            float: Value of the collision event function.
+        """
+        # Check if the particle is within the z bounds of the electrodes
+        z_factor = 0 if self.z <= z <= self.z + self.length else 1
+
+        # Check if the particle is within the x bounds of the electrodes
+        x_factor = 0 if self.x - self.separation / 2 <= x <= self.x + self.separation / 2 else 1
+
+        # Check if the particle is within the y bounds of the electrodes
+        y_factor = 0 if abs(y - self.y) <= self.width / 2 else 1
+
+        return z_factor + x_factor + y_factor
 
 
 @dataclass
@@ -998,7 +1009,7 @@ class Bore(BeamlineObject):
         N = x0.size
         ω = w[0]
         if not (np.allclose(w[0], w[1]) and w[2] == 0 and ω > 0):
-            raise ValueError("need isotropic trap with w=(ω,ω,0) and ω>0")
+            raise ValueError(f"need isotropic trap with w=(ω,ω,0) and ω>0, w = {w}")
 
         # cylinder axis (broadcast scalars)
         cx = np.asarray(self.x) if np.ndim(self.x) else np.full(N, self.x)
