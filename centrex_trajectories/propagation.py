@@ -26,23 +26,58 @@ __all__: List[str] = ["PropagationType", "propagate_trajectories", "PropagationO
 
 def do_ballistic(
     indices: npt.NDArray[np.int_],
-    timestamps_tracked: npt.NDArray[np.floating],
+    timestamps_tracked: npt.NDArray[np.float64],
     coordinates_tracked: Coordinates,
     velocities_tracked: Velocities,
     trajectories: Trajectories,
     section: Union[Section, ODESection],
     particle: Particle,
     force: Force,
-    z_save_section: Union[List[float], npt.NDArray[np.floating], None],
+    z_save_section: Optional[Union[List[float], npt.NDArray[np.float64]]],
     options: PropagationOptions,
-) -> tuple[
-    npt.NDArray[np.floating],
+) -> Tuple[
+    npt.NDArray[np.float64],
     Coordinates,
     Velocities,
     npt.NDArray[np.int_],
     Trajectories,
     SectionData,
 ]:
+    """
+    Propagate trajectories ballistically through a section.
+
+    Args:
+        indices (npt.NDArray[np.int_]):
+            Array of trajectory indices.
+        timestamps_tracked (npt.NDArray[np.float64]):
+            Array of tracked timestamps.
+        coordinates_tracked (Coordinates):
+            Tracked coordinates of the trajectories.
+        velocities_tracked (Velocities):
+            Tracked velocities of the trajectories.
+        trajectories (Trajectories):
+            Object holding trajectory data.
+        section (Union[Section, ODESection]):
+            The section through which to propagate.
+        particle (Particle):
+            The particle being propagated.
+        force (Force):
+            External force applied during propagation.
+        z_save_section (Optional[Union[List[float], npt.NDArray[np.float64]]]):
+            Z positions to save data for this section.
+        options (PropagationOptions):
+            Options for propagation.
+
+    Returns:
+        tuple:
+            A tuple containing:
+            - Updated timestamps_tracked (npt.NDArray[np.float64]).
+            - Updated coordinates_tracked (Coordinates).
+            - Updated velocities_tracked (Velocities).
+            - Updated indices (npt.NDArray[np.int_]).
+            - Updated trajectories (Trajectories).
+            - SectionData for the section.
+    """
     force_cst = force + section.force
     acceleration = Acceleration(
         force_cst.fx / particle.mass,
@@ -104,23 +139,58 @@ def do_ballistic(
 
 def do_linear(
     indices: npt.NDArray[np.int_],
-    timestamps_tracked: npt.NDArray[np.floating],
+    timestamps_tracked: npt.NDArray[np.float64],
     coordinates_tracked: Coordinates,
     velocities_tracked: Velocities,
     trajectories: Trajectories,
     section: LinearSection,
     particle: Particle,
     force: Force,
-    z_save_section: Union[List[float], npt.NDArray[np.floating], None],
+    z_save_section: Optional[Union[List[float], npt.NDArray[np.float64]]],
     options: PropagationOptions,
-) -> tuple[
-    npt.NDArray[np.floating],
+) -> Tuple[
+    npt.NDArray[np.float64],
     Coordinates,
     Velocities,
     npt.NDArray[np.int_],
     Trajectories,
     SectionData,
 ]:
+    """
+    Propagate trajectories through a linear section.
+
+    Args:
+        indices (npt.NDArray[np.int_]):
+            Array of trajectory indices.
+        timestamps_tracked (npt.NDArray[np.float64]):
+            Array of tracked timestamps.
+        coordinates_tracked (Coordinates):
+            Tracked coordinates of the trajectories.
+        velocities_tracked (Velocities):
+            Tracked velocities of the trajectories.
+        trajectories (Trajectories):
+            Object holding trajectory data.
+        section (LinearSection):
+            The linear section through which to propagate.
+        particle (Particle):
+            The particle being propagated.
+        force (Force):
+            External force applied during propagation.
+        z_save_section (Optional[Union[List[float], npt.NDArray[np.float64]]]):
+            Z positions to save data for this section.
+        options (PropagationOptions):
+            Options for propagation.
+
+    Returns:
+        tuple:
+            A tuple containing:
+            - Updated timestamps_tracked (npt.NDArray[np.float64]).
+            - Updated coordinates_tracked (Coordinates).
+            - Updated velocities_tracked (Velocities).
+            - Updated indices (npt.NDArray[np.int_]).
+            - Updated trajectories (Trajectories).
+            - SectionData for the section.
+    """
     force_cst = force + section.force
     acceleration = Acceleration(
         force_cst.fx / particle.mass,
@@ -192,32 +262,40 @@ def propagate_trajectories(
     coordinates_init: Coordinates,
     velocities_init: Velocities,
     particle: Particle,
-    t_start: Optional[npt.NDArray[np.floating]] = None,
+    t_start: Optional[npt.NDArray[np.float64]] = None,
     force: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
-    z_save: Optional[List] = None,
+    z_save: Optional[List[float]] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[List[SectionData], Trajectories]:
     """
-    Propagate trajectories through sections starting at initial coordinates and initial
-    velocities
+    Propagate trajectories through a series of sections starting from initial
+    coordinates and velocities.
 
     Args:
-        sections (List): sections to propagate through
-        coordinates_init (Coordinates): initial positions
-        velocities_init (Velocities): initial velocities
-        particle (Particle): particle to propagate
-        t_start (Optional[npt.NDArray[np.float64]], optional): initial timestamps.
-                                                                Defaults to None.
-        force (Force, optional): Force. Defaults to Force(0.0, -9.81, 0.0), gravity.
-        z_save (Optional[List], optional): z positions to save timestamps, coordinates
-                                            and velocities. Defaults to None.
-        options (PropagationOptions): Propagation options. Defaults to
-                                                PropagationOptions().
+        sections (List[Union[Section, ODESection, LinearSection]]):
+            List of sections to propagate through.
+        coordinates_init (Coordinates):
+            Initial positions of the particles.
+        velocities_init (Velocities):
+            Initial velocities of the particles.
+        particle (Particle):
+            The particle to propagate.
+        t_start (Optional[npt.NDArray[np.float64]], optional):
+            Initial timestamps. Defaults to None.
+        force (Force, optional):
+            External force applied during propagation. Defaults to gravity
+            (Force(0.0, -9.81 * TlF().mass, 0.0)).
+        z_save (Optional[List[float]], optional):
+            Z positions at which to save timestamps, coordinates, and velocities.
+            Defaults to None.
+        options (PropagationOptions, optional):
+            Options for propagation. Defaults to PropagationOptions().
 
     Returns:
-        Tuple[List[SectionData], Trajectories]: return a list with the data per section
-                                                stored as SectionData and the surviving
-                                                trajectories
+        Tuple[List[SectionData], Trajectories]:
+            A tuple containing:
+            - A list of SectionData objects with data for each section.
+            - The surviving trajectories as a Trajectories object.
     """
     # initialize index array to keeps track of trajectory indices that make it through
     indices = np.arange(len(coordinates_init))
@@ -244,9 +322,9 @@ def propagate_trajectories(
             ]
         else:
             z_save_section = None
-        # Initially when trajectories are propagated balistically they are stored in 2D
+        # Initially when trajectories are propagated ballistically they are stored in 2D
         # arrays, because particles take the same number of steps when propagating
-        # balistically. This is no longer true when propagating with an ODE solver, and
+        # ballistically. This is no longer true when propagating with an ODE solver, and
         # then storage is switched to Trajectories containing a single Trajectory for
         # each trajectory.
         # For performance this is only done after the first ODE section since the 2D
