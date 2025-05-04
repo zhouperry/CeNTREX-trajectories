@@ -1,4 +1,3 @@
-from collections.abc import Iterable
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union, overload
 
@@ -52,8 +51,8 @@ def _pos(
     v0: float,
     a: float,
     w: float,
-) -> float:
-    ...
+) -> float: ...
+
 
 @overload
 def _pos(
@@ -62,8 +61,8 @@ def _pos(
     v0: Union[float, npt.NDArray[np.floating]],
     a: float,
     w: float,
-) -> npt.NDArray[np.floating]:
-    ...
+) -> npt.NDArray[np.floating]: ...
+
 
 def _pos(
     t: Union[float, npt.NDArray[np.floating]],
@@ -99,8 +98,8 @@ def _vel(
     v0: float,
     a: float,
     w: float,
-) -> float:
-    ...
+) -> float: ...
+
 
 @overload
 def _vel(
@@ -109,8 +108,8 @@ def _vel(
     v0: Union[float, npt.NDArray[np.floating]],
     a: float,
     w: float,
-) -> npt.NDArray[np.floating]:
-    ...
+) -> npt.NDArray[np.floating]: ...
+
 
 def _vel(
     t: Union[float, npt.NDArray[np.floating]],
@@ -323,7 +322,13 @@ def propagate_linear_trajectories(
     # save coordinates and velocities at z positions z_save if supplied
     if z_save is not None:
         t_accepted = save_intermediate_states(
-            z_save, accepted_coords, accepted_velocities, t_accepted, acceleration, w, trap_center
+            z_save,
+            accepted_coords,
+            accepted_velocities,
+            t_accepted,
+            acceleration,
+            w,
+            trap_center,
         )
 
     # timestamps, coordinates and velocities at the end of the section
