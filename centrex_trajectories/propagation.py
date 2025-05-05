@@ -1,11 +1,12 @@
 import copy
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
 import numpy as np
 import numpy.typing as npt
 
 from .beamline_objects import LinearSection, ODESection, Section
+from .common_types import ForceType
 from .data_structures import (
     Acceleration,
     Coordinates,
@@ -123,7 +124,7 @@ def do_ballistic(
 
         # update trajectories that did make it through
         for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
-            trajectories.add_data(index, t, c, v)
+            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
 
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
 
@@ -243,7 +244,7 @@ def do_linear(
 
         # update trajectories that did make it through
         for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
-            trajectories.add_data(index, t, c, v)
+            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
 
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
 
@@ -392,17 +393,23 @@ def propagate_trajectories(
                 for index, t, c, v in zip(
                     indices, timestamps_tracked, coordinates_tracked, velocities_tracked
                 ):
-                    trajectories.add_data(index, t, c, v)
+                    trajectories.add_data(
+                        index, t, cast(Coordinates, c), cast(Velocities, v)
+                    )
             if isinstance(section, ODESection):
-                force_fun = section.force
+                force_fun = cast(
+                    ForceType, getattr(section, "force_fast_scalar", section.force)
+                )
                 force_cst = force
             else:
 
-                def force_fun(t, x, y, z):
-                    if isinstance(x, np.ndarray):
-                        return (np.zeros(x.shape), np.zeros(x.shape), np.zeros(x.shape))
-                    else:
-                        return (0.0, 0.0, 0.0)
+                def force_fun(
+                    t: float,
+                    x: float,
+                    y: float,
+                    z: float,
+                ) -> Tuple[float, float, float]:
+                    return (0.0, 0.0, 0.0)
 
                 force_cst = force + section.force
 
@@ -514,6 +521,7 @@ def propagate_trajectories(
             )
         # propagate linear if section is linear
         elif section.propagation_type == PropagationType.linear:
+            assert type(section) is LinearSection
             (
                 timestamps_tracked,
                 coordinates_tracked,
@@ -539,7 +547,9 @@ def propagate_trajectories(
         for index, t, c, v in zip(
             indices, timestamps_tracked, coordinates_tracked, velocities_tracked
         ):
-            trajectories[index] = Trajectory(t, c, v, index)
+            trajectories[index] = Trajectory(
+                t, cast(Coordinates, c), cast(Velocities, v), index
+            )
 
     # remove coordinate entries in a trajectory
     for trajectory in trajectories.values():

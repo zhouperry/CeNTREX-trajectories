@@ -1,32 +1,13 @@
-from typing import Optional, Self, Tuple
+from __future__ import annotations
 
-import numba as nb
+from typing import Optional, Self, Tuple, overload
+
 import numpy as np
 import numpy.typing as npt
 from numpy.polynomial import Polynomial
 
 from .common_types import NDArray_or_Float
-
-
-@nb.njit
-def _polyval_scalar(x: float, coeffs: npt.NDArray[np.float64]) -> float:
-    """Numba‑accelerated Horner‑scheme evaluation for scalar x."""
-    acc: float = 0.0
-    for c in coeffs[::-1]:  # Horner: highest power first
-        acc = acc * x + c
-    return acc
-
-
-@nb.njit
-def _polyval_1d(
-    x: npt.NDArray[np.float64], coeffs: npt.NDArray[np.float64]
-) -> npt.NDArray[np.float64]:
-    """Vectorised Horner‑scheme evaluation for a 1‑D array x."""
-    out = np.zeros_like(x)
-    for c in coeffs[::-1]:
-        out *= x
-        out += c
-    return out
+from .numba_functions import _polyval2d_scalar, _polyval_1d, _polyval_scalar
 
 
 class FastPolynomial(Polynomial):
@@ -35,16 +16,22 @@ class FastPolynomial(Polynomial):
     always returns its own subclass from algebraic and helper methods.
     """
 
-    def __call__(self, x: NDArray_or_Float) -> NDArray_or_Float:  # type: ignore[override]
+    @overload
+    def __call__(self, x: float) -> float: ...
+
+    @overload
+    def __call__(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
+
+    def __call__(self, x):
         if (
             self.domain.tolist() == [-1.0, 1.0]
             and self.coef.dtype == np.float64
             and self.coef.ndim == 1
         ):
-            coef = np.ascontiguousarray(self.coef)
+            coef = np.ascontiguousarray(self.coef, dtype=np.float64)
             # scalar fast‑path
-            if np.isscalar(x):
-                return _polyval_scalar(float(x), coef)
+            if isinstance(x, float):
+                return _polyval_scalar(x, coef)
             # 1‑D array fast‑path
             x_arr = np.asarray(x, dtype=np.float64)
             if x_arr.ndim == 1 and x_arr.flags.c_contiguous:
@@ -72,18 +59,6 @@ class FastPolynomial(Polynomial):
     identity = Polynomial.identity.__func__  # type: ignore
 
 
-@nb.njit
-def fast_scalar_polyval2d(
-    x: float, y: float, coeffs: npt.NDArray[np.floating]
-) -> float:
-    result = 0.0
-    for i in range(coeffs.shape[0]):
-        x_pow = x**i
-        for j in range(coeffs.shape[1]):
-            result += coeffs[i, j] * x_pow * y**j
-    return result
-
-
 class Polynomial2D:
     """2D polynomial with fitting, evaluation, differentiation, and pretty-printing.
 
@@ -101,7 +76,7 @@ class Polynomial2D:
         self,
         kx: int,
         ky: int,
-        coeffs: npt.NDArray[np.floating] | None = None,
+        coeffs: npt.NDArray[np.float64] | None = None,
         order: int | None = None,
     ) -> None:
         """Initialize a 2D polynomial.
@@ -164,6 +139,9 @@ class Polynomial2D:
             Handles special cases for zero and constant terms.
             Formats terms with appropriate signs (+ or -).
         """
+        if self.coeffs is None:
+            return "Polynomial2D(coeffs=None)"
+
         out = f"{self.coeffs[0, 0]}" if self.coeffs[0, 0] != 0 else ""
 
         for i, j in np.ndindex((self.kx + 1, self.ky + 1)):
@@ -192,7 +170,7 @@ class Polynomial2D:
         """
         return f"Polynomial2D({self._generate_string(Polynomial2D._str_term_unicode)})"
 
-    def __mul__(self, scalar: float | int) -> Self:
+    def __mul__(self, scalar: float | int) -> Polynomial2D:
         """Multiply polynomial by a scalar.
 
         Args:
@@ -220,7 +198,7 @@ class Polynomial2D:
             order=self.order,
         )
 
-    def __rmul__(self, scalar: float | int) -> Self:
+    def __rmul__(self, scalar: float | int) -> Polynomial2D:
         """Right multiplication by a scalar.
 
         Args:
@@ -258,7 +236,7 @@ class Polynomial2D:
         self.coeffs *= scalar
         return self
 
-    def __truediv__(self, scalar: float | int) -> Self:
+    def __truediv__(self, scalar: float | int) -> Polynomial2D:
         """Divide polynomial by a scalar.
 
         Args:
@@ -326,16 +304,16 @@ class Polynomial2D:
     # ─────────────────────────── public interface ───────────────────────────
     def fit(
         self: Self,
-        x: npt.NDArray[np.floating],
-        y: npt.NDArray[np.floating],
-        z: npt.NDArray[np.floating],
+        x: npt.NDArray[np.float64],
+        y: npt.NDArray[np.float64],
+        z: npt.NDArray[np.float64],
         order: int | None = None,
         zero_terms: list[tuple[int, int]] | None = None,
     ) -> tuple[
-        npt.NDArray[np.floating],
-        npt.NDArray[np.floating],
+        npt.NDArray[np.float64],
+        npt.NDArray[np.float64],
         int,
-        npt.NDArray[np.floating],
+        npt.NDArray[np.float64],
     ]:
         """Perform least‐squares fit of z = f(x,y) to a 2‑D polynomial.
 
@@ -374,7 +352,7 @@ class Polynomial2D:
 
         return sol  # type: ignore[return-value]  # NumPy stubs: OK
 
-    def derivative(self, axis: str = "x") -> Self:
+    def derivative(self, axis: str = "x") -> Polynomial2D:
         """Compute ∂/∂x or ∂/∂y, returning a new Polynomial2D.
 
         Args:
@@ -423,7 +401,7 @@ class Polynomial2D:
         if self.coeffs is None:
             raise ValueError("Polynomial has no coefficients set.")
         if isinstance(x, float) and isinstance(y, float):
-            return fast_scalar_polyval2d(x, y, self.coeffs)
+            return _polyval2d_scalar(x, y, self.coeffs)
         else:
             return np.polynomial.polynomial.polyval2d(x, y, self.coeffs)
 
@@ -437,4 +415,6 @@ class Polynomial2D:
         Returns:
             float: Evaluated polynomial values.
         """
-        return fast_scalar_polyval2d(x, y, self.coeffs)
+        if self.coeffs is None:
+            raise ValueError("Polynomial has no coefficients set.")
+        return _polyval2d_scalar(x, y, self.coeffs)

@@ -1,5 +1,4 @@
 import math
-from typing import Sequence
 
 import numba as nb
 import numpy as np
@@ -30,7 +29,7 @@ def fit_stark_potential(
     fit = np.polynomial.Polynomial.fit(
         x=electric_field, y=stark_potential, deg=degrees, domain=[]
     )
-    return fit.coef
+    return np.asarray(fit.coef, dtype=np.float64)
 
 
 def bounds_check_tolerance(
@@ -81,12 +80,14 @@ def richards(
     Returns:
         NDArray_or_Float: The Richards-curve value(s) at `z`.
     """
-    return y0 + Δy / ((1 + Q * np.exp(-B * (z - zc))) ** (1 / ν))
+    return y0 + Δy / ((1 + Q * np.exp(-B * (z - zc))) ** (1 / ν))  # type: ignore
 
 
+@nb.njit
 def double_richards_symmetric(
     z: NDArray_or_Float,
-    centers: Sequence[float],
+    c1: float,
+    c2: float,
     y0: float,
     dy: float,
     Q: float,
@@ -103,9 +104,8 @@ def double_richards_symmetric(
 
     Args:
         z (NDArray_or_Float): Independent variable(s) where to evaluate the curve.
-        centers (Sequence[float]): [c1, c2] where c1 is the inflection
-            point of the rising segment and c2 is the inflection point of the
-            falling segment. Must satisfy c1 < c2 for proper behavior.
+        c1 (float): Center of the first transition (rising).
+        c2 (float): Center of the second transition (falling).
         y0 (float): Baseline value before rise and after fall.
         dy (float): Amplitude of both the rising and falling segments.
         Q (float): Horizontal-shift parameter (same for both transitions).
@@ -121,14 +121,6 @@ def double_richards_symmetric(
         >>> y = double_richards_symmetric(z, [0, 2], 0.0, 1.0, 1.0, 5.0, 1.0)
         >>> # This creates a smooth transition from 0 to 1 at z=0 and back to 0 at z=2
     """
-    # Validate inputs to prevent common errors
-    if len(centers) != 2:
-        raise ValueError(f"Expected 2 centers, got {len(centers)}")
-
-    c1, c2 = centers
-    if c1 >= c2:
-        raise ValueError(f"Centers must satisfy c1 < c2, got {c1} and {c2}")
-
     # Use the richards() function for consistency and to avoid duplication
     r1 = richards(z, c1, 0.0, 1.0, Q, B, nu)
     r2 = richards(z, c2, 0.0, 1.0, Q, -B, nu)  # Note the -B for falling transition

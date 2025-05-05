@@ -4,7 +4,7 @@ import math
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple, overload
+from typing import Any, Callable, List, Optional, Tuple, cast, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -12,6 +12,7 @@ from scipy.optimize import brentq
 
 from .common_types import NDArray_or_Float
 from .data_structures import Acceleration, Coordinates, Force, Velocities
+from .numba_functions import _force_eql_poly_scalar, _force_eql_scalar
 from .particles import Particle
 from .polynomials import FastPolynomial, Polynomial2D
 from .propagation_ballistic import calculate_time_ballistic, propagate_ballistic
@@ -67,7 +68,7 @@ class Section:
         """
         for o in self.objects:
             assert o.check_in_bounds(self.start, self.stop), (
-                f"{o.name} not inside {self.name}"
+                f"{o} not inside {self.name}"
             )
 
 
@@ -126,7 +127,7 @@ class ODESection:
         """
         for o in self.objects:
             assert o.check_in_bounds(self.start, self.stop), (
-                f"{o.name} not inside {self.name}"
+                f"{o} not inside {self.name}"
             )
 
     @overload
@@ -233,16 +234,19 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Calculate the electric field of the lens at x,y,z
 
         Args:
-            x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
-            y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
-            z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
+            x (NDArray_or_Float): x coordinate(s) [m]
+            y (NDArray_or_Float): y coordinate(s) [m]
+            z (NDArray_or_Float): z coordinate(s) [m]
 
         Returns:
-            Union[NDArray[np.float64], float]: electric field at x,y,z in V/m
+            Union[NDArray_or_Float, float]: electric field at x,y,z in V/m
         """
         _x = self.x_transformed(x)
         _y = self.y_transformed(y)
-        return 2 * self.V * np.sqrt(_x**2 + _y**2) / (self.R) ** 2
+
+        return cast(
+            NDArray_or_Float, 2 * self.V * np.sqrt(_x**2 + _y**2) / (self.R) ** 2
+        )
 
     def electric_field_derivative_r(
         self,
@@ -307,7 +311,24 @@ class ElectrostaticQuadrupoleLens(ODESection):
         stark = -self.stark_potential_derivative(
             x, y, z
         ) * self.electric_field_derivative_r(x, y, z)
-        return (stark * dx, stark * dy, 0)
+
+        if isinstance(x, np.ndarray):
+            return (stark * dx, stark * dy, np.zeros_like(x))
+        else:
+            return (stark * dx, stark * dy, 0.0)
+
+    def force_fast_scalar(
+        self, t: float, x: float, y: float, z: float
+    ) -> tuple[float, float, float]:
+        return _force_eql_scalar(
+            x,
+            y,
+            self.x0,
+            self.y0,
+            self.V,
+            self.R,
+            self._stark_potential_derivative.coef,
+        )
 
     def stark_potential_derivative(
         self,
@@ -503,13 +524,18 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         self.potential_xy = self._potential_xy_at_unit_voltage * self._V
         if potential_z is None:
 
-            def potential_z(z: NDArray_or_Float) -> NDArray_or_Float:
+            @overload
+            def _potential_z(z: float) -> float: ...
+            @overload
+            def _potential_z(z: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
+
+            def _potential_z(z):
                 if isinstance(z, np.ndarray):
                     return np.ones(z.shape)
                 else:
                     return 1.0
 
-            self.potential_z = potential_z
+            self.potential_z = _potential_z
         else:
             self.potential_z = potential_z
         super().__init__(
@@ -583,7 +609,7 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         _x = self.x_transformed(x)
         _y = self.y_transformed(y)
         pot_z = self.potential_z(z)
-        if isinstance(x, np.ndarray):
+        if isinstance(_x, np.ndarray):
             return np.asarray(
                 [
                     pot_z * self.Ex(_x, _y),
@@ -671,6 +697,26 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
             return Fx, Fy, np.zeros_like(x)
         else:
             return Fx, Fy, 0.0
+
+    def force_fast_scalar(
+        self, t: float, x: float, y: float, z: float
+    ) -> tuple[float, float, float]:
+        pot_z = self.potential_z(z)
+
+        return _force_eql_poly_scalar(
+            x,
+            y,
+            self.x0,
+            self.y0,
+            pot_z,
+            self.Ex.coeffs,
+            self.Ey.coeffs,
+            self.Ex_x.coeffs,
+            self.Ex_y.coeffs,
+            self.Ey_x.coeffs,
+            self.Ey_y.coeffs,
+            self._stark_potential_derivative.coef,
+        )
 
 
 class MagnetostaticHexapoleLens(ODESection):
@@ -784,11 +830,11 @@ class MagnetostaticHexapoleLens(ODESection):
     def force(
         self,
         t: float,
-        x: npt.NDArray[np.floating],
-        y: npt.NDArray[np.floating],
-        z: npt.NDArray[np.floating],
+        x: npt.NDArray[np.float64],
+        y: npt.NDArray[np.float64],
+        z: npt.NDArray[np.float64],
     ) -> Tuple[
-        npt.NDArray[np.floating], npt.NDArray[np.floating], npt.NDArray[np.floating]
+        npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]
     ]: ...
 
     def force(
@@ -845,25 +891,25 @@ class MagnetostaticHexapoleLens(ODESection):
         r: NDArray_or_Float,
         ϕ: NDArray_or_Float,
         z: NDArray_or_Float,
-    ) -> List[NDArray_or_Float]:
+    ) -> Tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
         Br = self.Bar * np.cos(3 * ϕ) * (r / self.Rin) ** 2
         Bϕ = -self.Bar * np.sin(3 * ϕ) * (r / self.Rin) ** 2
         Bz = Br * 0.0
-        return [Br, Bϕ, Bz]
+        return (Br, Bϕ, Bz)
 
     def magnetic_field_cartesian(
         self,
         x: NDArray_or_Float,
         y: NDArray_or_Float,
         z: NDArray_or_Float,
-    ) -> List[NDArray_or_Float]:
+    ) -> Tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
         r = np.sqrt(x**2 + y**2)
         ϕ = np.arctan2(y, x)
         Br, Bϕ, Bz = self.magnetic_field_cylindrical(r, ϕ, z)
         Bx = np.cos(ϕ) * Br - np.sin(ϕ) * Bϕ
         By = np.sin(ϕ) * Br + np.cos(ϕ) * Bϕ
         Bz = Bx * 0.0
-        return [Bx, By, Bz]
+        return (Bx, By, Bz)
 
 
 @dataclass

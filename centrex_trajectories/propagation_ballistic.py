@@ -1,4 +1,3 @@
-from collections.abc import Iterable
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
@@ -12,7 +11,7 @@ __all__: List[str] = []
 
 
 def propagate_ballistic(
-    t: npt.NDArray[np.floating],
+    t: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
     acceleration: Acceleration,
@@ -21,7 +20,7 @@ def propagate_ballistic(
     Propagate trajectories starting at `origin` with `velocities` for a time `t`.
 
     Args:
-        t (npt.NDArray[np.floating]): 1D array of times to propagate per particle.
+        t (npt.NDArray[np.float64]): 1D array of times to propagate per particle.
         origin (Coordinates): Initial coordinates of each particle.
         velocities (Velocities): Initial velocities of each particle.
         acceleration (Acceleration): Acceleration acting on each particle.
@@ -70,25 +69,25 @@ def propagate_ballistic(
 
 
 def calculate_time_ballistic(
-    dx: npt.NDArray[np.floating],
-    v: npt.NDArray[np.floating],
-    a: Union[float, npt.NDArray[np.floating]] = 0.0
-) -> npt.NDArray[np.floating]:
+    dx: npt.NDArray[np.float64],
+    v: npt.NDArray[np.float64],
+    a: Union[float, npt.NDArray[np.float64]] = 0.0,
+) -> npt.NDArray[np.float64]:
     """
     Calculate the time it takes for a ballistic trajectory to travel a distance `dx`.
 
     Args:
-        dx (npt.NDArray[np.floating]): Distance to travel.
-        v (npt.NDArray[np.floating]): Initial velocity.
-        a (Union[float, npt.NDArray[np.floating]], optional): Acceleration. Defaults to 0.0.
+        dx (npt.NDArray[np.float64]): Distance to travel.
+        v (npt.NDArray[np.float64]): Initial velocity.
+        a (Union[float, npt.NDArray[np.float64]], optional): Acceleration. Defaults to 0.0.
 
     Returns:
-        npt.NDArray[np.floating]: Time required to travel the distance `dx`.
-                                   Returns NaN for invalid or negative times.
+        npt.NDArray[np.float64]: Time required to travel the distance `dx`.
+                                    Returns NaN for invalid or negative times.
     """
     dx = np.asarray(dx, dtype=np.float64)
     v = np.asarray(v, dtype=np.float64)
-    a = np.asarray(a, dtype=np.float64) if not np.isscalar(a) else a
+    a = np.asarray(a, dtype=np.float64) if not isinstance(a, float) else a
 
     # Case 1: No acceleration
     if np.all(a == 0):
@@ -104,7 +103,7 @@ def calculate_time_ballistic(
     t = np.full_like(dx, np.nan, dtype=np.float64)
 
     # Compute roots only for valid discriminant
-    if np.isscalar(a):
+    if isinstance(a, (float, int)):
         sqrt_discriminant = np.sqrt(discriminant[valid_discriminant])
         t1 = (sqrt_discriminant - v[valid_discriminant]) / a
         t2 = (-sqrt_discriminant - v[valid_discriminant]) / a
@@ -122,18 +121,18 @@ def calculate_time_ballistic(
 
 
 def propagate_ballistic_trajectories(
-    t_start: npt.NDArray[np.floating],
+    t_start: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
     objects: List,
     z_stop: float,
     acceleration: Acceleration = Acceleration(0.0, -9.81, 0.0),
-    z_save: Optional[Union[List[float], npt.NDArray[np.floating]]] = None,
+    z_save: Optional[Union[List[float], npt.NDArray[np.float64]]] = None,
     save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[
     npt.NDArray[np.bool_],
-    npt.NDArray[np.floating],
+    npt.NDArray[np.float64],
     Coordinates,
     Velocities,
     int,
@@ -143,15 +142,15 @@ def propagate_ballistic_trajectories(
     Propagate ballistic trajectories, storing timestamps, coordinates, and velocities.
 
     Args:
-        t_start (npt.NDArray[np.floating]): Start times for each trajectory.
+        t_start (npt.NDArray[np.float64]): Start times for each trajectory.
         origin (Coordinates): Initial coordinates of each particle.
         velocities (Velocities): Initial velocities of each particle.
         objects (List): List of objects (e.g., apertures) to interact with.
         z_stop (float): Z-coordinate at which to stop trajectory propagation.
         acceleration (Acceleration, optional): Acceleration acting on particles.
-                                               Defaults to Acceleration(0.0, -9.81, 0.0).
-        z_save (Optional[Union[List[float], npt.NDArray[np.floating]]], optional):
-               Z-coordinates at which to save intermediate states. Defaults to None.
+                                                Defaults to Acceleration(0.0, -9.81, 0.0).
+        z_save (Optional[Union[List[float], npt.NDArray[np.float64]]], optional):
+                Z-coordinates at which to save intermediate states. Defaults to None.
         save_collisions (bool, optional): Whether to save collision data. Defaults to False.
         options (PropagationOptions, optional): Options for trajectory propagation.
                                                 Defaults to PropagationOptions().
@@ -174,7 +173,9 @@ def propagate_ballistic_trajectories(
         if not np.allclose(dz, 0):  # If there is a non-zero distance to propagate
             vz = accepted_velocities.vz  # Extract z-velocity
             az = acceleration.az  # Extract z-acceleration
-            t = calculate_time_ballistic(dz, vz, az)  # Calculate time to reach the object
+            t = calculate_time_ballistic(
+                dz, vz, az
+            )  # Calculate time to reach the object
 
             # Propagate coordinates and velocities to the object's z-position
             x, v = propagate_ballistic(

@@ -1,3 +1,4 @@
+import math
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union, overload
 
@@ -25,7 +26,10 @@ def _C(ω: float, t: NDArray_or_Float) -> NDArray_or_Float:
     Returns:
         NDArray_or_Float: Computed cosine values.
     """
-    return np.cos(ω * t)
+    if isinstance(t, np.ndarray):
+        return np.cos(ω * t)
+    else:
+        return math.cos(ω * t)
 
 
 def _S(ω: float, t: NDArray_or_Float) -> NDArray_or_Float:
@@ -41,43 +45,49 @@ def _S(ω: float, t: NDArray_or_Float) -> NDArray_or_Float:
     Returns:
         NDArray_or_Float: Computed sine/ω values or t.
     """
-    return t if ω == 0 else np.sin(ω * t) / ω
+    if ω == 0:
+        return t
+    else:
+        if isinstance(t, np.ndarray):
+            return np.sin(ω * t) / ω
+        else:
+            return math.sin(ω * t) / ω
 
 
 @overload
 def _pos(
     t: float,
-    r0: float,
-    v0: float,
+    r0: npt.NDArray[np.float64],
+    v0: npt.NDArray[np.float64],
     a: float,
     w: float,
-) -> float: ...
+) -> npt.NDArray[np.float64]: ...
 
 
 @overload
 def _pos(
-    t: npt.NDArray[np.floating],
-    r0: Union[float, npt.NDArray[np.floating]],
-    v0: Union[float, npt.NDArray[np.floating]],
+    t: npt.NDArray[np.float64],
+    r0: npt.NDArray[np.float64],
+    v0: npt.NDArray[np.float64],
     a: float,
     w: float,
-) -> npt.NDArray[np.floating]: ...
+) -> npt.NDArray[np.float64]: ...
 
 
 def _pos(
-    t: Union[float, npt.NDArray[np.floating]],
-    r0: Union[float, npt.NDArray[np.floating]],
-    v0: Union[float, npt.NDArray[np.floating]],
-    a: float,
-    w: float,
-) -> Union[float, npt.NDArray[np.floating]]:
+    t,
+    r0,
+    v0,
+    a,
+    w,
+):
     """
     Compute position in one coordinate with or without a spring force.
 
     Args:
-        t (Union[float, npt.NDArray[np.floating]]): Time or array of time values.
-        r0 (Union[float, npt.NDArray[np.floating]]): Initial position or array of positions.
-        v0 (Union[float, npt.NDArray[np.floating]]): Initial velocity or array of velocities.
+        t (Union[float, npt.NDArray[np.float64]]): Time or array of time values.
+        r0 (Union[float, npt.NDArray[np.float64]]): Initial position or array of positions.
+        v0 (Union[float, npt.NDArray[np.float64]]): Initial velocity or array of velocities.
         a (float): Constant acceleration.
         w (float): Angular frequency of the spring.
 
@@ -94,39 +104,39 @@ def _pos(
 @overload
 def _vel(
     t: float,
-    r0: float,
-    v0: float,
+    r0: npt.NDArray[np.float64],
+    v0: npt.NDArray[np.float64],
     a: float,
     w: float,
-) -> float: ...
+) -> npt.NDArray[np.float64]: ...
 
 
 @overload
 def _vel(
-    t: npt.NDArray[np.floating],
-    r0: Union[float, npt.NDArray[np.floating]],
-    v0: Union[float, npt.NDArray[np.floating]],
+    t: npt.NDArray[np.float64],
+    r0: npt.NDArray[np.float64],
+    v0: npt.NDArray[np.float64],
     a: float,
     w: float,
-) -> npt.NDArray[np.floating]: ...
+) -> npt.NDArray[np.float64]: ...
 
 
 def _vel(
-    t: Union[float, npt.NDArray[np.floating]],
-    r0: Union[float, npt.NDArray[np.floating]],
-    v0: Union[float, npt.NDArray[np.floating]],
-    a: float,
-    w: float,
-) -> Union[float, npt.NDArray[np.floating]]:
+    t,
+    r0,
+    v0,
+    a,
+    w,
+):
     """
     Compute velocity in one coordinate.
 
     This is the derivative of the position function `_pos`.
 
     Args:
-        t (Union[float, npt.NDArray[np.floating]]): Time or array of time values.
-        r0 (Union[float, npt.NDArray[np.floating]]): Initial position or array of positions.
-        v0 (Union[float, npt.NDArray[np.floating]]): Initial velocity or array of velocities.
+        t (Union[float, npt.NDArray[np.float64]]): Time or array of time values.
+        r0 (Union[float, npt.NDArray[np.float64]]): Initial position or array of positions.
+        v0 (Union[float, npt.NDArray[np.float64]]): Initial velocity or array of velocities.
         a (float): Constant acceleration.
         w (float): Angular frequency of the spring.
 
@@ -139,7 +149,7 @@ def _vel(
 
 
 def propagate_linear(
-    t: Union[float, npt.NDArray[np.floating]],
+    t: Union[float, npt.NDArray[np.float64]],
     origin: Coordinates,
     velocities: Velocities,
     acceleration: Acceleration,
@@ -150,7 +160,7 @@ def propagate_linear(
     Propagate the position and velocity of an object linearly.
 
     Args:
-        t (Union[float, npt.NDArray[np.floating]]): Time or array of time values.
+        t (Union[float, npt.NDArray[np.float64]]): Time or array of time values.
         origin (Coordinates): Initial coordinates of the object.
         velocities (Velocities): Initial velocities of the object.
         acceleration (Acceleration): Constant acceleration acting on the object.
@@ -179,28 +189,28 @@ def propagate_linear(
 
 
 def save_intermediate_states(
-    z_save: Union[List[float], npt.NDArray[np.floating]],
+    z_save: Union[List[float], npt.NDArray[np.float64]],
     accepted_coords: Coordinates,
     accepted_velocities: Velocities,
-    t_accepted: npt.NDArray[np.floating],
+    t_accepted: npt.NDArray[np.float64],
     acceleration: Acceleration,
     w: Tuple[float, float, float],
     trap_center: Tuple[float, float],
-) -> npt.NDArray[np.floating]:
+) -> npt.NDArray[np.float64]:
     """
     Save intermediate states of the trajectory at specified z positions.
 
     Args:
-        z_save (Union[List[float], npt.NDArray[np.floating]]): Z positions to save intermediate states.
+        z_save (Union[List[float], npt.NDArray[np.float64]]): Z positions to save intermediate states.
         accepted_coords (Coordinates): Current accepted coordinates.
         accepted_velocities (Velocities): Current accepted velocities.
-        t_accepted (npt.NDArray[np.floating]): Current accepted time values.
+        t_accepted (npt.NDArray[np.float64]): Current accepted time values.
         acceleration (Acceleration): Constant acceleration acting on the object.
         w (Tuple[float, float, float]): Angular frequencies (wx, wy, wz).
         trap_center (Tuple[float, float]): Center of the spring trap.
 
     Returns:
-        npt.NDArray[np.floating]: Updated accepted time values.
+        npt.NDArray[np.float64]: Updated accepted time values.
     """
     for idz, z in enumerate(z_save):
         coords = accepted_coords.get_last()
@@ -218,7 +228,7 @@ def save_intermediate_states(
 
 
 def propagate_linear_trajectories(
-    t_start: npt.NDArray[np.floating],
+    t_start: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
     objects: List,
@@ -226,12 +236,12 @@ def propagate_linear_trajectories(
     acceleration: Acceleration = Acceleration(0.0, -9.81, 0.0),
     w: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     trap_center: Tuple[float, float] = (0.0, 0.0),
-    z_save: Optional[Union[List[float], npt.NDArray[np.floating]]] = None,
+    z_save: Optional[Union[List[float], npt.NDArray[np.float64]]] = None,
     save_collisions: bool = False,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[
     npt.NDArray[np.bool_],
-    npt.NDArray[np.floating],
+    npt.NDArray[np.float64],
     Coordinates,
     Velocities,
     int,
@@ -241,7 +251,7 @@ def propagate_linear_trajectories(
     Propagate trajectories linearly through a series of objects.
 
     Args:
-        t_start (npt.NDArray[np.floating]): Initial time values.
+        t_start (npt.NDArray[np.float64]): Initial time values.
         origin (Coordinates): Initial coordinates of the objects.
         velocities (Velocities): Initial velocities of the objects.
         objects (List): List of objects to propagate through.
@@ -249,14 +259,14 @@ def propagate_linear_trajectories(
         acceleration (Acceleration, optional): Constant acceleration. Defaults to gravity.
         w (Tuple[float, float, float], optional): Angular frequencies. Defaults to (0.0, 0.0, 0.0).
         trap_center (Tuple[float, float], optional): Center of the spring trap. Defaults to (0.0, 0.0).
-        z_save (Optional[Union[List[float], npt.NDArray[np.floating]]], optional): Z positions to save intermediate states. Defaults to None.
+        z_save (Optional[Union[List[float], npt.NDArray[np.float64]]], optional): Z positions to save intermediate states. Defaults to None.
         save_collisions (bool, optional): Whether to save collision data. Defaults to False.
         options (PropagationOptions, optional): Additional propagation options. Defaults to PropagationOptions().
 
     Returns:
         Tuple: A tuple containing:
             - survive (npt.NDArray[np.bool_]): Boolean array indicating surviving objects.
-            - t_accepted (npt.NDArray[np.floating]): Accepted time values.
+            - t_accepted (npt.NDArray[np.float64]): Accepted time values.
             - accepted_coords (Coordinates): Final accepted coordinates.
             - accepted_velocities (Velocities): Final accepted velocities.
             - nr_collisions (int): Number of collisions.
