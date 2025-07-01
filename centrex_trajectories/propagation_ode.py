@@ -16,7 +16,7 @@ __all__: List[str] = []
 
 def z_stop_event_generator(
     z_stop: float,
-) -> Callable[[float, npt.NDArray[np.float_]], float]:
+) -> Callable[[float, npt.NDArray[np.float64]], float]:
     """
     Generate a terminal event function for solve_ivp that returns zero when z equals
     z_stop
@@ -30,7 +30,7 @@ def z_stop_event_generator(
 
     def event(
         t: float,
-        y: npt.NDArray[np.float_],
+        y: npt.NDArray[np.float64],
     ) -> float:
         return y[2] - z_stop
 
@@ -41,30 +41,38 @@ def z_stop_event_generator(
 
 def collision_event_generator(
     collision_events: Sequence[Callable[[float, float, float], float]],
-) -> Sequence[Callable[[float, npt.NDArray[np.float_]], float]]:
-    events = []
-    for collision_event in collision_events:
-
-        def event(
-            t: float,
-            y: npt.NDArray[np.float_],
-        ) -> float:
+) -> Sequence[Callable[[float, npt.NDArray[np.float64]], float]]:
+    def create_event(collision_event):
+        def event(t: float, y: npt.NDArray[np.float64]) -> float:
             return collision_event(y[0], y[1], y[2])
 
         event.terminal = True  # type: ignore
-        events.append(event)
-    return events
+        return event
+
+    return [create_event(collision_event) for collision_event in collision_events]
 
 
-def solve_ode(*args) -> OptimizeResult:
+def solve_ode(
+    t: float,
+    x: Coordinates,
+    v: Velocities,
+    z_stop: float,
+    mass: float,
+    force: Callable[[float, float, float, float], Tuple[float, float, float]],
+    force_cst: Force,
+    events: List[Callable[[float, npt.NDArray[np.float64]], float]],
+) -> OptimizeResult:
     """
     Solve the trajectory propagation ODE for a single trajectory
 
     Returns:
         OptimizeResult: solution of the trajectory ODE
     """
-    t, x, v, z_stop, mass, force, force_cst, events = args
     t_span = [t, t + 2 * (z_stop - x.z) / v.vz]
+    if t_span[1] <= t_span[0]:
+        raise ValueError(
+            "Invalid `t_span`: Ensure `z_stop` is greater than the initial z position."
+        )
     z_stop_event = z_stop_event_generator(z_stop)
     p = [x.x, x.y, x.z, v.vx, v.vy, v.vz]
     _ode_fun = partial(
@@ -113,7 +121,7 @@ def ode_fun(
 
 
 def propagate_ODE_trajectories(
-    t_start: npt.NDArray[np.float_],
+    t_start: npt.NDArray[np.float64],
     origin: Coordinates,
     velocities: Velocities,
     z_stop: float,
@@ -122,7 +130,7 @@ def propagate_ODE_trajectories(
     force_cst: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
     events: Sequence[Callable[[float, float, float], float]] = [],
     z_save: Optional[
-        Union[List[Union[float, int]], npt.NDArray[Union[np.float_, np.int_]]]
+        Union[List[Union[float, int]], npt.NDArray[Union[np.float64, np.int_]]]
     ] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> List[OptimizeResult]:
@@ -149,8 +157,14 @@ def propagate_ODE_trajectories(
                                                 Defaults to PropagationOptions().
 
     Returns:
-        _type_: _description_
+        List[OptimizeResult]: A list of solutions for each trajectory, where each solution
+                              contains the time, position, and velocity data for the particle.
     """
+    if len(t_start) != len(origin) or len(origin) != len(velocities):
+        raise ValueError(
+            "`t_start`, `origin`, and `velocities` must have the same length."
+        )
+
     collision_events = collision_event_generator(events)
 
     solutions = Parallel(n_jobs=options.n_cores, verbose=int(options.verbose))(
@@ -159,4 +173,7 @@ def propagate_ODE_trajectories(
         )
         for t, x, v in zip(t_start, origin, velocities)
     )
+    if solutions is None:
+        raise ValueError("No trajectories.")
+
     return solutions

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "centrex-trajectories"
-version = "0.3.1"
+version = "0.3.2"
 description = ""
 license = "MIT"
 authors = ["ograsdijk <o.grasdijk@gmail.com>"]
@@ -10,10 +10,11 @@ include = ["centrex_trajectories/saved_data/stark_poly.pkl"]
 
 [tool.poetry.dependencies]
 python = ">3.10"
-numpy = "^1.23.4"
-scipy = "^1.9.3"
+numpy = "^2.2.5"
+scipy = "^1.15.2"
 joblib = "^1.2.0"
-matplotlib = "^3.6.2"
+matplotlib = "^3.10.1"
+numba = "^0.61.2"
 
 [build-system]
 requires = ["poetry-core"]
@@ -29,4 +30,8 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "joblib.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "numba.*"
 ignore_missing_imports = true

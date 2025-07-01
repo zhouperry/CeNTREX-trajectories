@@ -1,11 +1,12 @@
 import copy
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
 import numpy as np
 import numpy.typing as npt
 
-from .beamline_objects import ODESection, Section
+from .beamline_objects import LinearSection, ODESection, Section
+from .common_types import ForceType
 from .data_structures import (
     Acceleration,
     Coordinates,
@@ -17,6 +18,7 @@ from .data_structures import (
 )
 from .particles import Particle, TlF
 from .propagation_ballistic import propagate_ballistic_trajectories
+from .propagation_linear import propagate_linear_trajectories
 from .propagation_ode import propagate_ODE_trajectories
 from .propagation_options import PropagationOptions, PropagationType
 
@@ -25,23 +27,58 @@ __all__: List[str] = ["PropagationType", "propagate_trajectories", "PropagationO
 
 def do_ballistic(
     indices: npt.NDArray[np.int_],
-    timestamps_tracked: npt.NDArray[np.float_],
+    timestamps_tracked: npt.NDArray[np.float64],
     coordinates_tracked: Coordinates,
     velocities_tracked: Velocities,
     trajectories: Trajectories,
     section: Union[Section, ODESection],
     particle: Particle,
     force: Force,
-    z_save_section: Union[List[float], npt.NDArray[np.float_], None],
+    z_save_section: Optional[Union[List[float], npt.NDArray[np.float64]]],
     options: PropagationOptions,
-) -> tuple[
-    npt.NDArray[np.float_],
+) -> Tuple[
+    npt.NDArray[np.float64],
     Coordinates,
     Velocities,
     npt.NDArray[np.int_],
     Trajectories,
     SectionData,
 ]:
+    """
+    Propagate trajectories ballistically through a section.
+
+    Args:
+        indices (npt.NDArray[np.int_]):
+            Array of trajectory indices.
+        timestamps_tracked (npt.NDArray[np.float64]):
+            Array of tracked timestamps.
+        coordinates_tracked (Coordinates):
+            Tracked coordinates of the trajectories.
+        velocities_tracked (Velocities):
+            Tracked velocities of the trajectories.
+        trajectories (Trajectories):
+            Object holding trajectory data.
+        section (Union[Section, ODESection]):
+            The section through which to propagate.
+        particle (Particle):
+            The particle being propagated.
+        force (Force):
+            External force applied during propagation.
+        z_save_section (Optional[Union[List[float], npt.NDArray[np.float64]]]):
+            Z positions to save data for this section.
+        options (PropagationOptions):
+            Options for propagation.
+
+    Returns:
+        tuple:
+            A tuple containing:
+            - Updated timestamps_tracked (npt.NDArray[np.float64]).
+            - Updated coordinates_tracked (Coordinates).
+            - Updated velocities_tracked (Velocities).
+            - Updated indices (npt.NDArray[np.int_]).
+            - Updated trajectories (Trajectories).
+            - SectionData for the section.
+    """
     force_cst = force + section.force
     acceleration = Acceleration(
         force_cst.fx / particle.mass,
@@ -87,7 +124,127 @@ def do_ballistic(
 
         # update trajectories that did make it through
         for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
-            trajectories.add_data(index, t, c, v)
+            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
+
+    section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
+
+    return (
+        timestamps_tracked,
+        coordinates_tracked,
+        velocities_tracked,
+        indices,
+        trajectories,
+        section_data,
+    )
+
+
+def do_linear(
+    indices: npt.NDArray[np.int_],
+    timestamps_tracked: npt.NDArray[np.float64],
+    coordinates_tracked: Coordinates,
+    velocities_tracked: Velocities,
+    trajectories: Trajectories,
+    section: LinearSection,
+    particle: Particle,
+    force: Force,
+    z_save_section: Optional[Union[List[float], npt.NDArray[np.float64]]],
+    options: PropagationOptions,
+) -> Tuple[
+    npt.NDArray[np.float64],
+    Coordinates,
+    Velocities,
+    npt.NDArray[np.int_],
+    Trajectories,
+    SectionData,
+]:
+    """
+    Propagate trajectories through a linear section.
+
+    Args:
+        indices (npt.NDArray[np.int_]):
+            Array of trajectory indices.
+        timestamps_tracked (npt.NDArray[np.float64]):
+            Array of tracked timestamps.
+        coordinates_tracked (Coordinates):
+            Tracked coordinates of the trajectories.
+        velocities_tracked (Velocities):
+            Tracked velocities of the trajectories.
+        trajectories (Trajectories):
+            Object holding trajectory data.
+        section (LinearSection):
+            The linear section through which to propagate.
+        particle (Particle):
+            The particle being propagated.
+        force (Force):
+            External force applied during propagation.
+        z_save_section (Optional[Union[List[float], npt.NDArray[np.float64]]]):
+            Z positions to save data for this section.
+        options (PropagationOptions):
+            Options for propagation.
+
+    Returns:
+        tuple:
+            A tuple containing:
+            - Updated timestamps_tracked (npt.NDArray[np.float64]).
+            - Updated coordinates_tracked (Coordinates).
+            - Updated velocities_tracked (Velocities).
+            - Updated indices (npt.NDArray[np.int_]).
+            - Updated trajectories (Trajectories).
+            - SectionData for the section.
+    """
+    force_cst = force + section.force
+    acceleration = Acceleration(
+        force_cst.fx / particle.mass,
+        force_cst.fy / particle.mass,
+        force_cst.fz / particle.mass,
+    )
+    w = (
+        math.sqrt(section.spring_constant[0] / particle.mass),
+        math.sqrt(section.spring_constant[1] / particle.mass),
+        math.sqrt(section.spring_constant[2] / particle.mass),
+    )
+    (
+        mask,
+        timestamp_list,
+        coord_list,
+        velocities_list,
+        nr_collisions,
+        collisions,
+    ) = propagate_linear_trajectories(
+        t_start=timestamps_tracked
+        if timestamps_tracked.ndim == 1
+        else timestamps_tracked[:, -1],
+        origin=coordinates_tracked.get_last(),
+        velocities=velocities_tracked.get_last(),
+        objects=section.objects,
+        z_stop=section.stop,
+        acceleration=acceleration,
+        w=w,
+        trap_center=(section.x, section.y),
+        z_save=z_save_section,
+        save_collisions=section.save_collisions,
+        options=options,
+    )
+
+    # only keep trajectories that made it through
+    timestamps_tracked = timestamps_tracked[mask]
+    coordinates_tracked = coordinates_tracked.get_masked(mask)
+    velocities_tracked = velocities_tracked.get_masked(mask)
+    indices = indices[mask]
+
+    # append latest timestamps, coordinates and velocities to the 2D arrays
+    timestamps_tracked = np.column_stack([timestamps_tracked, timestamp_list])
+    coordinates_tracked.column_stack(coord_list)
+    velocities_tracked.column_stack(velocities_list)
+
+    # remove trajectories that didn't make it through
+    if len(trajectories) != 0:
+        remove = [k for k in trajectories.keys() if k not in indices]
+        trajectories.delete_trajectories(remove)
+
+        # update trajectories that did make it through
+        for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
+            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
 
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
 
@@ -102,36 +259,44 @@ def do_ballistic(
 
 
 def propagate_trajectories(
-    sections: List[Union[Section, ODESection]],
+    sections: List[Union[Section, ODESection, LinearSection]],
     coordinates_init: Coordinates,
     velocities_init: Velocities,
     particle: Particle,
-    t_start: Optional[npt.NDArray[np.float_]] = None,
+    t_start: Optional[npt.NDArray[np.float64]] = None,
     force: Force = Force(0.0, -9.81 * TlF().mass, 0.0),
-    z_save: Optional[List] = None,
+    z_save: Optional[List[float]] = None,
     options: PropagationOptions = PropagationOptions(),
 ) -> Tuple[List[SectionData], Trajectories]:
     """
-    Propagate trajectories through sections starting at initial coordinates and initial
-    velocities
+    Propagate trajectories through a series of sections starting from initial
+    coordinates and velocities.
 
     Args:
-        sections (List): sections to propagate through
-        coordinates_init (Coordinates): initial positions
-        velocities_init (Velocities): initial velocities
-        particle (Particle): particle to propagate
-        t_start (Optional[npt.NDArray[np.float64]], optional): initial timestamps.
-                                                                Defaults to None.
-        force (Force, optional): Force. Defaults to Force(0.0, -9.81, 0.0), gravity.
-        z_save (Optional[List], optional): z positions to save timestamps, coordinates
-                                            and velocities. Defaults to None.
-        options (PropagationOptions): Propagation options. Defaults to
-                                                PropagationOptions().
+        sections (List[Union[Section, ODESection, LinearSection]]):
+            List of sections to propagate through.
+        coordinates_init (Coordinates):
+            Initial positions of the particles.
+        velocities_init (Velocities):
+            Initial velocities of the particles.
+        particle (Particle):
+            The particle to propagate.
+        t_start (Optional[npt.NDArray[np.float64]], optional):
+            Initial timestamps. Defaults to None.
+        force (Force, optional):
+            External force applied during propagation. Defaults to gravity
+            (Force(0.0, -9.81 * TlF().mass, 0.0)).
+        z_save (Optional[List[float]], optional):
+            Z positions at which to save timestamps, coordinates, and velocities.
+            Defaults to None.
+        options (PropagationOptions, optional):
+            Options for propagation. Defaults to PropagationOptions().
 
     Returns:
-        Tuple[List[SectionData], Trajectories]: return a list with the data per section
-                                                stored as SectionData and the surviving
-                                                trajectories
+        Tuple[List[SectionData], Trajectories]:
+            A tuple containing:
+            - A list of SectionData objects with data for each section.
+            - The surviving trajectories as a Trajectories object.
     """
     # initialize index array to keeps track of trajectory indices that make it through
     indices = np.arange(len(coordinates_init))
@@ -158,9 +323,9 @@ def propagate_trajectories(
             ]
         else:
             z_save_section = None
-        # Initially when trajectories are propagated balistically they are stored in 2D
+        # Initially when trajectories are propagated ballistically they are stored in 2D
         # arrays, because particles take the same number of steps when propagating
-        # balistically. This is no longer true when propagating with an ODE solver, and
+        # ballistically. This is no longer true when propagating with an ODE solver, and
         # then storage is switched to Trajectories containing a single Trajectory for
         # each trajectory.
         # For performance this is only done after the first ODE section since the 2D
@@ -228,17 +393,23 @@ def propagate_trajectories(
                 for index, t, c, v in zip(
                     indices, timestamps_tracked, coordinates_tracked, velocities_tracked
                 ):
-                    trajectories.add_data(index, t, c, v)
+                    trajectories.add_data(
+                        index, t, cast(Coordinates, c), cast(Velocities, v)
+                    )
             if isinstance(section, ODESection):
-                force_fun = section.force
+                force_fun = cast(
+                    ForceType, getattr(section, "force_fast_scalar", section.force)
+                )
                 force_cst = force
             else:
 
-                def force_fun(t, x, y, z):
-                    if isinstance(x, np.ndarray):
-                        return (np.zeros(x.shape), np.zeros(x.shape), np.zeros(x.shape))
-                    else:
-                        return (0.0, 0.0, 0.0)
+                def force_fun(
+                    t: float,
+                    x: float,
+                    y: float,
+                    z: float,
+                ) -> Tuple[float, float, float]:
+                    return (0.0, 0.0, 0.0)
 
                 force_cst = force + section.force
 
@@ -348,12 +519,37 @@ def propagate_trajectories(
             section_data.append(
                 SectionData(section.name, collisions, nr_collisions, nr_trajectories)
             )
+        # propagate linear if section is linear
+        elif section.propagation_type == PropagationType.linear:
+            assert type(section) is LinearSection
+            (
+                timestamps_tracked,
+                coordinates_tracked,
+                velocities_tracked,
+                indices,
+                trajectories,
+                sec_dat,
+            ) = do_linear(
+                indices=indices,
+                timestamps_tracked=timestamps_tracked,
+                coordinates_tracked=coordinates_tracked,
+                velocities_tracked=velocities_tracked,
+                trajectories=trajectories,
+                section=section,
+                particle=particle,
+                force=force,
+                z_save_section=z_save_section,
+                options=options,
+            )
+            section_data.append(sec_dat)
 
     if len(trajectories) == 0:
         for index, t, c, v in zip(
             indices, timestamps_tracked, coordinates_tracked, velocities_tracked
         ):
-            trajectories[index] = Trajectory(t, c, v, index)
+            trajectories[index] = Trajectory(
+                t, cast(Coordinates, c), cast(Velocities, v), index
+            )
 
     # remove coordinate entries in a trajectory
     for trajectory in trajectories.values():
