@@ -22,7 +22,7 @@ from .propagation_ballistic import propagate_ballistic_trajectories
 from .propagation_linear import propagate_linear_trajectories
 from .propagation_ode import propagate_ODE_trajectories
 from .propagation_options import PropagationOptions, PropagationType
-
+from typing import cast
 __all__: List[str] = ["PropagationType", "propagate_trajectories", "PropagationOptions"]
 
 
@@ -121,17 +121,31 @@ def do_ballistic(
     # remove trajectories that didn't make it through
     if len(trajectories) != 0:
         if isinstance(indices, cp.ndarray):
-            indices = cp.asnumpy(indices)
+            indices_set = set(cp.asnumpy(indices))
             timestamp_list = cp.asnumpy(timestamp_list)
             coord_list = Coordinates(cp.asnumpy(coord_list.x), cp.asnumpy(coord_list.y), cp.asnumpy(coord_list.z))
             velocities_list = Velocities(cp.asnumpy(velocities_list.vx), cp.asnumpy(velocities_list.vy), cp.asnumpy(velocities_list.vz))
-        remove = [k for k in trajectories.keys() if k not in indices]
-        trajectories.delete_trajectories(remove)
+        else:
+            # If it's already a list/iterable (and not CuPy), convert to set directly
+            indices_set = set(indices)
+        all_keys_set = set(trajectories.keys())
+        keys_to_keep_set = indices_set
+        remove = list(all_keys_set - keys_to_keep_set)
 
-        # update trajectories that did make it through
-        for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
-            index = int(index)
-            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
+        # 3. Perform removal using the much smaller 'remove' list
+        if len(trajectories) != 0:
+            trajectories.delete_trajectories(remove)
+            if isinstance(indices, cp.ndarray):
+                # Use the converted NumPy array version
+                indices_iterable = cp.asnumpy(indices)
+            else:
+                # Use the original list/iterable
+                indices_iterable = indices
+
+            for index, t, c, v in zip(indices_iterable, timestamp_list, coord_list, velocities_list):
+                index = int(index)
+                trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
+
     if not isinstance(indices, cp.ndarray):
         indices = cp.array(indices)
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
