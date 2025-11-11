@@ -592,7 +592,6 @@ def propagate_trajectories(
     # If an ODE section ran, 'ode_trajectories' has detailed
     # intermediate steps. We merge this data into our final object.
     if len(ode_trajectories) > 0:
-        print("Merging detailed ODE steps...")
         for index, trajectory in trajectories.items():
             if index in ode_trajectories:
                 # Replace the simple history (from bulk add)
