@@ -17,7 +17,7 @@ from typing import (
 
 import numpy as np
 import numpy.typing as npt
-
+import cupy as cp
 from .common_types import OdeResultLike
 
 __all__: List[str] = [
@@ -132,7 +132,13 @@ class Velocities:
     vx: npt.NDArray[np.float64]
     vy: npt.NDArray[np.float64]
     vz: npt.NDArray[np.float64]
-
+    def get_numpy(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+            """Transfers all velocities from GPU to CPU as NumPy arrays."""
+            return (
+                cp.asnumpy(self.vx),
+                cp.asnumpy(self.vy),
+                cp.asnumpy(self.vz)
+            )
     def get_masked(self, mask: npt.NDArray[np.bool_]) -> Velocities:
         """
         return the masked velocities
@@ -285,6 +291,14 @@ class Coordinates:
     x: npt.NDArray[np.float64]
     y: npt.NDArray[np.float64]
     z: npt.NDArray[np.float64]
+    
+    def get_numpy(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+            """Transfers all coordinates from GPU to CPU as NumPy arrays."""
+            return (
+                cp.asnumpy(self.x),
+                cp.asnumpy(self.y),
+                cp.asnumpy(self.z)
+            )
 
     def get_masked(self, mask: npt.NDArray[np.bool_]) -> Coordinates:
         """
@@ -641,7 +655,7 @@ class Trajectories(MutableMapping[int, Trajectory]):
             )
         else:
             self._storage[index].append_from_ode(sol, save_start=False)
-
+    
     def get_coordinates_velocities_at_position(
         self,
         *,
@@ -682,3 +696,62 @@ class Trajectories(MutableMapping[int, Trajectory]):
                 Coordinates(np.array(x_list), np.array(y_list), np.array(z_list)),
                 Velocities(np.array(vx), np.array(vy), np.array(vz)),
             )
+    # This code goes INSIDE the Trajectories class in data_structures.py
+
+    def add_data_bulk(
+        self,
+        indices: np.ndarray,
+        timestamps: np.ndarray,
+        coordinates: Coordinates,
+        velocities: Velocities,
+    ) -> None:
+        """
+        Efficiently populates the Trajectories object from bulk NumPy arrays.
+
+        This method is designed to be called *once*, typically during the
+        first transition from a ballistic (GPU, 2D arrays) to an ODE
+        (CPU, object-based) section.
+
+        It replaces a slow, particle-by-particle Python 'for' loop
+        in the main propagation logic.
+
+        Args:
+            indices (np.ndarray): 1D array of particle indices. (Shape N)
+            timestamps (np.ndarray): 2D array of timestamps. (Shape N, S)
+            coordinates (Coordinates): A Coordinates object holding 2D arrays. (Shape N, S)
+            velocities (Velocities): A Velocities object holding 2D arrays. (Shape N, S)
+        """
+        # This is a Python loop, but it's iterating N (number of particles)
+        # times, NOT N * S (total data points). It's also only called
+        # ONCE per simulation, so its cost is negligible.
+        for i in range(len(indices)):
+            # Get the unique integer ID for this particle
+            index = int(indices[i])
+
+            # This check ensures we don't accidentally overwrite data.
+            # This method should only be called when self._storage is empty.
+            if index not in self._storage:
+                
+                # Get this particle's 1D history using the class's
+                # built-in __getitem__ method.
+                # coordinates[i] returns a new Coordinates object
+                # with 1D arrays (x[i,:], y[i,:], z[i,:])
+                coords_particle = coordinates[i]
+                
+                # velocities[i] returns a new Velocities object
+                # with 1D arrays (vx[i,:], vy[i,:], vz[i,:])
+                vels_particle = velocities[i]
+
+                # Get this particle's 1D timestamp history
+                t_particle = timestamps[i, :]
+
+                # Create the new Trajectory object
+                trajectory = Trajectory(
+                    t=t_particle,
+                    coordinates=coords_particle,
+                    velocities=vels_particle,
+                    index=index,
+                )
+
+                # Add the fully-formed Trajectory object to storage
+                self._storage[index] = trajectory

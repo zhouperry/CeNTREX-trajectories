@@ -31,7 +31,6 @@ def do_ballistic(
     timestamps_tracked: npt.NDArray[np.float64],
     coordinates_tracked: Coordinates,
     velocities_tracked: Velocities,
-    trajectories: Trajectories,
     section: Union[Section, ODESection],
     particle: Particle,
     force: Force,
@@ -42,7 +41,6 @@ def do_ballistic(
     Coordinates,
     Velocities,
     npt.NDArray[np.int_],
-    Trajectories,
     SectionData,
 ]:
     """
@@ -77,7 +75,6 @@ def do_ballistic(
             - Updated coordinates_tracked (Coordinates).
             - Updated velocities_tracked (Velocities).
             - Updated indices (npt.NDArray[np.int_]).
-            - Updated trajectories (Trajectories).
             - SectionData for the section.
     """
     force_cst = force + section.force
@@ -118,36 +115,6 @@ def do_ballistic(
     coordinates_tracked.column_stack(coord_list)
     velocities_tracked.column_stack(velocities_list)
 
-    # remove trajectories that didn't make it through
-    if len(trajectories) != 0:
-        if isinstance(indices, cp.ndarray):
-            indices_set = set(cp.asnumpy(indices))
-            timestamp_list = cp.asnumpy(timestamp_list)
-            coord_list = Coordinates(cp.asnumpy(coord_list.x), cp.asnumpy(coord_list.y), cp.asnumpy(coord_list.z))
-            velocities_list = Velocities(cp.asnumpy(velocities_list.vx), cp.asnumpy(velocities_list.vy), cp.asnumpy(velocities_list.vz))
-        else:
-            # If it's already a list/iterable (and not CuPy), convert to set directly
-            indices_set = set(indices)
-        all_keys_set = set(trajectories.keys())
-        keys_to_keep_set = indices_set
-        remove = list(all_keys_set - keys_to_keep_set)
-
-        # 3. Perform removal using the much smaller 'remove' list
-        if len(trajectories) != 0:
-            trajectories.delete_trajectories(remove)
-            if isinstance(indices, cp.ndarray):
-                # Use the converted NumPy array version
-                indices_iterable = cp.asnumpy(indices)
-            else:
-                # Use the original list/iterable
-                indices_iterable = indices
-
-            for index, t, c, v in zip(indices_iterable, timestamp_list, coord_list, velocities_list):
-                index = int(index)
-                trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
-
-    if not isinstance(indices, cp.ndarray):
-        indices = cp.array(indices)
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
 
     return (
@@ -155,7 +122,6 @@ def do_ballistic(
         coordinates_tracked,
         velocities_tracked,
         indices,
-        trajectories,
         section_data,
     )
 
@@ -165,7 +131,6 @@ def do_linear(
     timestamps_tracked: npt.NDArray[np.float64],
     coordinates_tracked: Coordinates,
     velocities_tracked: Velocities,
-    trajectories: Trajectories,
     section: LinearSection,
     particle: Particle,
     force: Force,
@@ -176,7 +141,6 @@ def do_linear(
     Coordinates,
     Velocities,
     npt.NDArray[np.int_],
-    Trajectories,
     SectionData,
 ]:
     """
@@ -191,8 +155,6 @@ def do_linear(
             Tracked coordinates of the trajectories.
         velocities_tracked (Velocities):
             Tracked velocities of the trajectories.
-        trajectories (Trajectories):
-            Object holding trajectory data.
         section (LinearSection):
             The linear section through which to propagate.
         particle (Particle):
@@ -211,7 +173,6 @@ def do_linear(
             - Updated coordinates_tracked (Coordinates).
             - Updated velocities_tracked (Velocities).
             - Updated indices (npt.NDArray[np.int_]).
-            - Updated trajectories (Trajectories).
             - SectionData for the section.
     """
     force_cst = force + section.force
@@ -259,15 +220,7 @@ def do_linear(
     coordinates_tracked.column_stack(coord_list)
     velocities_tracked.column_stack(velocities_list)
 
-    # remove trajectories that didn't make it through
-    if len(trajectories) != 0:
-        remove = [k for k in trajectories.keys() if k not in indices]
-        trajectories.delete_trajectories(remove)
-
-        # update trajectories that did make it through
-        for index, t, c, v in zip(indices, timestamp_list, coord_list, velocities_list):
-            trajectories.add_data(index, t, cast(Coordinates, c), cast(Velocities, v))
-
+    
     section_data = SectionData(section.name, collisions, nr_collisions, len(mask))
 
     return (
@@ -275,7 +228,6 @@ def do_linear(
         coordinates_tracked,
         velocities_tracked,
         indices,
-        trajectories,
         section_data,
     )
 
@@ -343,7 +295,8 @@ def propagate_trajectories(
 
     # class to hold trajectories
     trajectories = Trajectories()
-
+    ode_trajectories = Trajectories()
+    is_cpu_state = False
     # propagate through sections
     for section in sections:
         if z_save is not None:
@@ -363,11 +316,14 @@ def propagate_trajectories(
         # After the ODE section the coordinates and velocities are transformed into
         # 2D arrays again, starting and the end of the ODE section. This allows for
         # use of the performant ballistic propagation method again after the ODE section
-
+        is_gpu_section = (
+                    section.propagation_type == PropagationType.ballistic
+                    or section.propagation_type == PropagationType.linear
+                )
         # propagate ballistic if section is ballistic
-        if section.propagation_type == PropagationType.ballistic:
-            if not isinstance(timestamps_tracked, cp.ndarray):
-            # initialize 2D arrays for keeping track of the ballistic coordinates
+        if is_gpu_section:
+            if is_cpu_state:
+                # initialize 2D arrays for keeping track of the ballistic coordinates
                 timestamps_tracked = (
                     cp.asarray(t_start) if t_start is not None else cp.zeros(len(indices))
                 )
@@ -382,34 +338,53 @@ def propagate_trajectories(
                     cp.asarray(velocities_tracked.vz),
                 )
                 indices = cp.asarray(indices)
-                
-            
-            (
-                timestamps_tracked,
-                coordinates_tracked,
-                velocities_tracked,
-                indices,
-                trajectories,
+                is_cpu_state = False
+
+            if section.propagation_type == PropagationType.ballistic:
+                (
+                    timestamps_tracked,
+                    coordinates_tracked,
+                    velocities_tracked,
+                    indices,
                 sec_dat,
-            ) = do_ballistic(
-                indices=indices,
-                timestamps_tracked=timestamps_tracked,
-                coordinates_tracked=coordinates_tracked,
-                velocities_tracked=velocities_tracked,
-                trajectories=trajectories,
-                section=section,
-                particle=particle,
-                force=force,
-                z_save_section=z_save_section,
-                options=options,
-            )
-            section_data.append(sec_dat)
+                ) = do_ballistic(
+                    indices=indices,
+                    timestamps_tracked=timestamps_tracked,
+                    coordinates_tracked=coordinates_tracked,
+                    velocities_tracked=velocities_tracked,
+                    section=section,
+                    particle=particle,
+                    force=force,
+                    z_save_section=z_save_section,
+                    options=options,
+                )
+                section_data.append(sec_dat)
+            else:
+                (
+                    timestamps_tracked,
+                    coordinates_tracked,
+                    velocities_tracked,
+                    indices,
+                    sec_dat,
+                ) = do_linear(
+                    indices=indices,
+                    timestamps_tracked=timestamps_tracked,
+                    coordinates_tracked=coordinates_tracked,
+                    velocities_tracked=velocities_tracked,
+                    section=section,
+                    particle=particle,
+                    force=force,
+                    z_save_section=z_save_section,
+                    options=options,
+                )
+                section_data.append(sec_dat)
+
         # propagate ODE if section is ODE
         elif section.propagation_type == PropagationType.ode:
             if np.any(
                 coordinates_tracked.get_last().z < section.start
             ) and not np.allclose(coordinates_tracked.get_last().z, section.start):
-                if not isinstance(timestamps_tracked, cp.ndarray):
+                if is_cpu_state:
                     # initialize 2D arrays for keeping track of the ballistic coordinates
                     timestamps_tracked = (
                         cp.asarray(t_start) if t_start is not None else cp.zeros(len(indices))
@@ -453,25 +428,22 @@ def propagate_trajectories(
                     z_save_section=z_save_section,
                     options=options,
                 )
-            coordinates_tracked = Coordinates(
-                cp.asnumpy(coordinates_tracked.x),
-                cp.asnumpy(coordinates_tracked.y),
-                cp.asnumpy(coordinates_tracked.z),
-            )
-            velocities_tracked = Velocities(
-                cp.asnumpy(velocities_tracked.vx),
-                cp.asnumpy(velocities_tracked.vy),
-                cp.asnumpy(velocities_tracked.vz),
-            )
-            timestamps_tracked = cp.asnumpy(timestamps_tracked)
-            indices = cp.asnumpy(indices)
+                if not is_cpu_state:
+                    timestamps_tracked = cp.asnumpy(timestamps_tracked)
+                    coords_np_tuple = coordinates_tracked.get_numpy()
+                    vels_np_tuple = velocities_tracked.get_numpy()
+                    indices = cp.asnumpy(indices)
 
-            if len(trajectories) == 0:
-                for index, t, c, v in zip(
-                    indices, timestamps_tracked, coordinates_tracked, velocities_tracked
-                ):
-                    trajectories.add_data(
-                        index, t, cast(Coordinates, c), cast(Velocities, v)
+                    coordinates_tracked = Coordinates(*coords_np_tuple)
+                    velocities_tracked = Velocities(*vels_np_tuple)
+                    is_cpu_state = True
+
+                if len(ode_trajectories) == 0:
+                    ode_trajectories.add_data_bulk(
+                        indices,
+                        timestamps_tracked, # NumPy array
+                        coordinates_tracked,  # NumPy-backed object
+                        velocities_tracked  # NumPy-backed object
                     )
             if isinstance(section, ODESection):
                 force_fun = cast(
@@ -479,7 +451,6 @@ def propagate_trajectories(
                 )
                 force_cst = force
             else:
-
                 def force_fun(
                     t: float,
                     x: float,
@@ -539,10 +510,15 @@ def propagate_trajectories(
                     remove = [k for k in trajectories.keys() if k not in indices]
                     trajectories.delete_trajectories(remove)
 
-            solutions = propagate_ODE_trajectories(
+            (
+                solutions,
+                final_t_np,      # NEW from modified solver
+                final_coords_np, # NEW from modified solver
+                final_vels_np    # NEW from modified solver
+            ) = propagate_ODE_trajectories(
                 t_start=timestamps_tracked[:, -1]
                 if timestamps_tracked.ndim > 1
-                else timestamps_tracked[-1],
+                else timestamps_tracked, # Already 1D
                 origin=coordinates_tracked.get_last(),
                 velocities=velocities_tracked.get_last(),
                 z_stop=section.stop,
@@ -553,19 +529,18 @@ def propagate_trajectories(
                 options=options,
             )
 
-            timestamps = []
-            coords = []
-            velocities = []
             for sol, index in zip(solutions, indices):
-                timestamps.append(sol.t[-1])
-                trajectories.add_data_ode(index, sol)
-                coords.append([sol.y[0, -1], sol.y[1, -1], sol.y[2, -1]])
-                velocities.append([sol.y[3, -1], sol.y[4, -1], sol.y[5, -1]])
+                ode_trajectories.add_data_ode(index, sol)
 
-            timestamps_tracked = np.column_stack([timestamps_tracked, timestamps])
+            # Use the new bulk arrays for history tracking (FAST)
+            timestamps_tracked = np.column_stack([timestamps_tracked, final_t_np])
 
-            coordinates_tracked.column_stack(Coordinates(*np.array(coords).T))
-            velocities_tracked.column_stack(Velocities(*np.array(velocities).T))
+            coordinates_tracked.column_stack(
+                Coordinates(final_coords_np[:,0], final_coords_np[:,1], final_coords_np[:,2])
+            )
+            velocities_tracked.column_stack(
+                Velocities(final_vels_np[:,0], final_vels_np[:,1], final_vels_np[:,2])
+            )
             # check for trajectories that didn't make it, e.g. hit objects during the
             # ode solver and terminated early
             mask = np.ones(len(solutions), dtype=bool)
@@ -596,49 +571,40 @@ def propagate_trajectories(
                 SectionData(section.name, collisions, nr_collisions, nr_trajectories)
             )
 
-        # propagate linear if section is linear
-        elif section.propagation_type == PropagationType.linear:
-            assert type(section) is LinearSection
-            (
-                timestamps_tracked,
-                coordinates_tracked,
-                velocities_tracked,
-                indices,
-                trajectories,
-                sec_dat,
-            ) = do_linear(
-                indices=indices,
-                timestamps_tracked=timestamps_tracked,
-                coordinates_tracked=coordinates_tracked,
-                velocities_tracked=velocities_tracked,
-                trajectories=trajectories,
-                section=section,
-                particle=particle,
-                force=force,
-                z_save_section=z_save_section,
-                options=options,
-            )
-            section_data.append(sec_dat)
         gc.collect()  # Collect garbage to free memory after each section
-    coordinates_tracked = Coordinates(
-        cp.asnumpy(coordinates_tracked.x),
-        cp.asnumpy(coordinates_tracked.y),
-        cp.asnumpy(coordinates_tracked.z),
+    
+    if isinstance(timestamps_tracked, cp.ndarray):
+        timestamps_tracked = cp.asnumpy(timestamps_tracked)
+        coordinates_tracked = Coordinates(*coordinates_tracked.get_numpy())
+        velocities_tracked = Velocities(*velocities_tracked.get_numpy())
+        indices = cp.asnumpy(indices)
+
+    
+    # Use the 'add_data_bulk' method you created
+    trajectories.add_data_bulk(
+        indices,
+        timestamps_tracked,
+        coordinates_tracked,
+        velocities_tracked
     )
-    velocities_tracked = Velocities(
-        cp.asnumpy(velocities_tracked.vx),
-        cp.asnumpy(velocities_tracked.vy),
-        cp.asnumpy(velocities_tracked.vz),
-    )
-    timestamps_tracked = cp.asnumpy(timestamps_tracked)
-    indices = cp.asnumpy(indices)
-    if len(trajectories) == 0:
-        for index, t, c, v in zip(
-            indices, timestamps_tracked, coordinates_tracked, velocities_tracked
-        ):
-            trajectories[index] = Trajectory(
-                t, cast(Coordinates, c), cast(Velocities, v), index
-            )
+
+    # ** MERGE DETAILED ODE STEPS **
+    # If an ODE section ran, 'ode_trajectories' has detailed
+    # intermediate steps. We merge this data into our final object.
+    if len(ode_trajectories) > 0:
+        print("Merging detailed ODE steps...")
+        for index, trajectory in trajectories.items():
+            if index in ode_trajectories:
+                # Replace the simple history (from bulk add)
+                # with the detailed history (from ODE)
+                detailed_traj = ode_trajectories[index]
+                trajectory.t = detailed_traj.t
+                trajectory.coordinates = detailed_traj.coordinates
+                trajectory.velocities = detailed_traj.velocities
+
+    # remove duplicate entries
+    for trajectory in trajectories.values():
+        trajectory.remove_duplicate_entries()
 
     # remove coordinate entries in a trajectory
     for trajectory in trajectories.values():

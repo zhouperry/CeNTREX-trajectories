@@ -133,7 +133,12 @@ def propagate_ODE_trajectories(
         Union[List[Union[float, int]], npt.NDArray[Union[np.float64, np.int_]]]
     ] = None,
     options: PropagationOptions = PropagationOptions(),
-) -> List[OptimizeResult]:
+)-> Tuple[
+    List[OptimizeResult],  # 1. The original list of solution objects
+    np.ndarray,            # 2. Bulk array of final timestamps (N,)
+    np.ndarray,            # 3. Bulk array of final coordinates (N, 3)
+    np.ndarray             # 4. Bulk array of final velocities (N, 3)
+]:
     """
     propagate trajectories with an ODE solver
 
@@ -158,7 +163,13 @@ def propagate_ODE_trajectories(
 
     Returns:
         List[OptimizeResult]: A list of solutions for each trajectory, where each solution
-                              contains the time, position, and velocity data for the particle.
+                              contains the time, position, and velocity data for the particle.Returns:
+        Tuple[
+            List[OptimizeResult]: A list of solutions for each trajectory.
+            np.ndarray: 1D NumPy array of final timestamps. (Shape N,)
+            np.ndarray: 2D NumPy array of final coordinates. (Shape N, 3)
+            np.ndarray: 2D NumPy array of final velocities. (Shape N, 3)
+        ]
     """
     if len(t_start) != len(origin) or len(origin) != len(velocities):
         raise ValueError(
@@ -176,4 +187,23 @@ def propagate_ODE_trajectories(
     if solutions is None:
         raise ValueError("No trajectories.")
 
-    return solutions
+    # Vectorize the results processing by pre-allocating arrays
+    n_solutions = len(solutions)
+
+    # Pre-allocate NumPy arrays for the *final* state of each trajectory
+    final_t_np = np.empty(n_solutions, dtype=np.float64)
+    final_coords_np = np.empty((n_solutions, 3), dtype=np.float64)
+    final_vels_np = np.empty((n_solutions, 3), dtype=np.float64)
+
+    # Fill arrays (this loop is fast, it's over N solutions, not N*S points)
+    for i, sol in enumerate(solutions):
+        # Get the last state from the ODE solution
+        # sol.t[-1] is the final time
+        # sol.y[:,-1] is the final state vector [x, y, z, vx, vy, vz]
+        final_t_np[i] = sol.t[-1]
+        final_coords_np[i] = sol.y[0:3, -1] # Final [x, y, z]
+        final_vels_np[i] = sol.y[3:6, -1] # Final [vx, vy, vz]
+    # --- END NEW SECTION ---
+
+    # Return both the original solutions AND the new bulk arrays
+    return solutions, final_t_np, final_coords_np, final_vels_np
