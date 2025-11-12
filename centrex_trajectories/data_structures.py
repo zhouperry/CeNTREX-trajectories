@@ -598,7 +598,40 @@ class Trajectories(MutableMapping[int, Trajectory]):
         """
         for index in indices:
             del self._storage[index]
+    def merge_and_reindex(self, other: Trajectories) -> None:
+            """
+            Appends all trajectories from 'other' into 'self' by re-indexing
+            the 'other' trajectories to ensure unique indices.
 
+            This method should be used when combining results from separate, 
+            independent Monte Carlo batches.
+            """
+            if not other:
+                return  # Nothing to merge
+
+            # 1. Find the highest existing index in the current object
+            if self._storage:
+                max_index = max(self._storage.keys())
+            else:
+                max_index = -1  # Start at index 0 if self is empty
+
+            new_index_start = max_index + 1
+            new_storage = {}
+
+            # 2. Iterate through and re-index the trajectories from 'other'
+            for i, (old_index, trajectory) in enumerate(other.items()):
+                new_index = new_index_start + i
+                
+                # 3. CRITICAL STEP: Update the 'index' attribute inside the Trajectory object
+                # Use super().__setattr__ if Trajectory is a frozen dataclass
+                # Assuming Trajectory is not frozen:
+                trajectory.index = new_index 
+                
+                # 4. Store the trajectory under the new index
+                new_storage[new_index] = trajectory
+
+            # 5. Perform the bulk merge using the new, unique dictionary
+            self._storage.update(new_storage)
     def add_data(
         self,
         index: int,
