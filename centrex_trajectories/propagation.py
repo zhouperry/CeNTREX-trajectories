@@ -406,14 +406,12 @@ def propagate_trajectories(
                     coordinates_tracked,
                     velocities_tracked,
                     indices,
-                    trajectories,
                     sec_dat,
                 ) = do_ballistic(
                     indices=indices,
                     timestamps_tracked=timestamps_tracked,
                     coordinates_tracked=coordinates_tracked,
                     velocities_tracked=velocities_tracked,
-                    trajectories=trajectories,
                     section=Section(
                         name="_",
                         objects=[],
