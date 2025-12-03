@@ -8,11 +8,20 @@ from typing import Any, Callable, List, Optional, Tuple, cast, overload
 
 import numpy as np
 import numpy.typing as npt
+import cupy as cp
 from scipy.optimize import brentq
 
 from .common_types import NDArray_or_Float
 from .data_structures import Acceleration, Coordinates, Force, Velocities
-from .numba_functions import _force_eql_poly_scalar, _force_eql_scalar
+from .numba_functions import (
+    _coordinate_transformation,
+    _force_eql_poly_scalar,
+    _force_eql_poly_scalar_tilt,
+    _force_eql_scalar,
+    _force_eql_scalar_tilt,
+    _rotation,
+    _translation,
+)
 from .particles import Particle
 from .polynomials import FastPolynomial, Polynomial2D
 from .propagation_ballistic import calculate_time_ballistic, propagate_ballistic
@@ -182,30 +191,35 @@ class ElectrostaticQuadrupoleLens(ODESection):
         stark_potential: None | npt.NDArray[np.float64] = None,
     ) -> None:
         """
-        Electrostatic Quadrupole Lens Section
+        Initialize an electrostatic quadrupole lens section.
+
+        The lens produces a quadrupole electric field: E(r) = k*r where k = V/R².
+        Particles experience a Stark force: F = -dV/dE * ∇|E|
 
         Args:
-            name (str): name of electrostatic quadrupole lens
-            objects (List): objects inside the section which particles can collide with
-            start (float): start of section in z [m]
-            stop (float): stop of section in z [m]
-            V (float): Voltage on electrodes [Volts]
-            R (float): radius of lens bore [m]
-            save_collisions (Optional[bool], optional): Save the coordinates and
-                                                    velocities of collisions in this
-                                                    section. Defaults to False.
-            stark_potential (Optional[np.ndarray]): polynomial coefficients of the stark
-                                                    potential as a function of electric
-                                                    field
+            name: Name of the electrostatic quadrupole lens
+            objects: Beamline objects that particles can collide with
+            start: Start position of section along z-axis [m]
+            stop: End position of section along z-axis [m]
+            V: Voltage applied to electrodes [Volts]
+            R: Radius of lens bore [m]
+            x: x-coordinate of lens center [m] (default: 0)
+            y: y-coordinate of lens center [m] (default: 0)
+            tilt: Tilt angle of lens around x-axis [radians] (default: 0)
+            save_collisions: Whether to save collision coordinates and velocities (default: False)
+            stark_potential: Polynomial coefficients of Stark potential as function of E-field.
+                           If None, uses default TlF Stark potential (default: None)
         """
         super().__init__(name, objects, start, stop, save_collisions)
-        self.V = V
+        self._V = V
         self.R = R
         self.x0 = x
         self.y0 = y
         self.tilt = tilt
-        self._sin_tilt = np.sin(tilt)
-        self._cos_tilt = np.cos(tilt)
+        # precompute tilt trig and field gradient constant
+        self._cos_tilt = float(np.cos(self.tilt))
+        self._sin_tilt = float(np.sin(self.tilt))
+        self._k = float(self._V) / (self.R ** 2)
         self._check_objects()
         self._initialize_potentials(stark_potential)
 
@@ -213,7 +227,14 @@ class ElectrostaticQuadrupoleLens(ODESection):
         self, stark_potential: None | npt.NDArray[np.float64] = None
     ) -> None:
         """
-        Generate the radial derivative of the Stark potential for the force calculation
+        Initialize Stark potential polynomial and its derivative.
+
+        Creates FastPolynomial objects for efficient evaluation in numba-compiled code.
+        The derivative is used for force calculations: F = -dV/dE * ∇|E|
+
+        Args:
+            stark_potential: Polynomial coefficients for Stark potential V(E).
+                           If None, uses default TlF potential.
         """
         if stark_potential is None:
             self._stark_potential = stark_potential_default
@@ -221,56 +242,96 @@ class ElectrostaticQuadrupoleLens(ODESection):
             self._stark_potential = FastPolynomial(stark_potential)
 
         self._stark_potential_derivative = self._stark_potential.deriv()
-  
-    def translation(self,
-        x: NDArray_or_Float,
-        y: NDArray_or_Float,
-        z: NDArray_or_Float,
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]:
-        """
-        Given the position x, y, z, generate the relative coordinates w.r.t. the lens
-        
-        Args:
-            x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
-            y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
-            z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
+        # Store coefficients as contiguous float64 array for numba functions
+        self._stark_deriv_coef: npt.NDArray[np.float64] = np.ascontiguousarray(
+            self._stark_potential_derivative.coef, dtype=np.float64
+        )
+
+    @property
+    def V(self) -> float:
+        """Get the voltage applied to the lens.
 
         Returns:
-            Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]] transformed coordinates
+            float: Current voltage in Volts.
         """
-        return (x - self.x0, y - self.y0, z)
-    
-    def rotation(self,
+        return self._V
+
+    @V.setter
+    def V(self, voltage: float) -> None:
+        """
+        Set lens voltage and rescale the polynomial potential.
+
+        Args:
+            voltage: New voltage [V].
+        """
+        self._V = float(voltage)
+        self._k = float(self._V) / (self.R ** 2)
+
+    def translation(
+        self,
         x: NDArray_or_Float,
         y: NDArray_or_Float,
         z: NDArray_or_Float,
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]:
+    ) -> Tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
         """
-        Given the position x, y, z, generate the relative coordinates w.r.t. the lens coordinate system
-        
+        Translate coordinates to lens center frame.
+
         Args:
-            x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
-            y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
-            z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
+            x: x coordinate(s) in lab frame [m]
+            y: y coordinate(s) in lab frame [m]
+            z: z coordinate(s) in lab frame [m]
 
         Returns:
-            Tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]] transformed coordinates
+            Translated coordinates (x-x0, y-y0, z) relative to lens center
         """
-        return (x, y*np.cos(self.tilt)-z*np.sin(self.tilt), y*np.sin(self.tilt)+z*np.cos(self.tilt))
-    
-    def coordinate_transformation(self,
+        return _translation(x, y, z, self.x0, self.y0)
+
+    def rotation(
+        self,
         x: NDArray_or_Float,
         y: NDArray_or_Float,
         z: NDArray_or_Float,
-    ) -> Tuple[
-        npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.float_]
-    ]:
-        _x, _y, _z = self.translation(x,y,z)
-        return self.rotation(_x, _y, _z)
+    ) -> Tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
+        """
+        Rotate coordinates around x-axis by lens tilt angle.
+
+        Applies rotation matrix R_x(tilt):
+        y' = y*cos(tilt) - z*sin(tilt)
+        z' = y*sin(tilt) + z*cos(tilt)
+
+        Args:
+            x: x coordinate(s) [m]
+            y: y coordinate(s) [m]
+            z: z coordinate(s) [m]
+
+        Returns:
+            Rotated coordinates (x, y', z')
+        """
+        return _rotation(x, y, z, self._cos_tilt, self._sin_tilt)
+
+    def coordinate_transformation(
+        self,
+        x: NDArray_or_Float,
+        y: NDArray_or_Float,
+        z: NDArray_or_Float,
+    ) -> Tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
+        """
+        Transform coordinates from lab frame to lens frame.
+
+        Applies translation followed by rotation: first shifts to lens center,
+        then rotates around x-axis by tilt angle.
+
+        Args:
+            x: x coordinate(s) in lab frame [m]
+            y: y coordinate(s) in lab frame [m]
+            z: z coordinate(s) in lab frame [m]
+
+        Returns:
+            Coordinates in lens frame (x', y', z')
+        """
+        return _coordinate_transformation(
+            x, y, z, self.x0, self.y0, self._cos_tilt, self._sin_tilt
+        )
 
     def electric_field(
         self,
@@ -289,11 +350,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
         Returns:
             Union[NDArray_or_Float, float]: electric field at x,y,z in V/m
         """
-        _x, _y, _z = self.coordinate_transformation(x,y,z)
+        _x, _y, _z = self.coordinate_transformation(x, y, z)
 
-        return cast(
-            NDArray_or_Float, 2 * self.V * np.sqrt(_x**2 + _y**2) / (self.R) ** 2
-        )
+        return cast(NDArray_or_Float, self._k * np.sqrt(_x**2 + _y**2))
 
     def electric_field_derivative_r(
         self,
@@ -313,9 +372,9 @@ class ElectrostaticQuadrupoleLens(ODESection):
             Union[npt.NDArray[np.float64], float]: derivative of electric field in r V/m^2
         """
         if isinstance(x, np.ndarray):
-            return 2 * self.V / self.R**2 * np.ones(x.shape)
+            return self._k * np.ones(x.shape)
         else:
-            return 2 * self.V / self.R**2
+            return self._k
 
     @overload
     def force(
@@ -335,48 +394,71 @@ class ElectrostaticQuadrupoleLens(ODESection):
 
     def force(self, t, x, y, z):
         """
-        Calculate the force at x,y,z
+        Calculate the Stark force at given coordinates.
+
+        The force is computed in the rotated lens frame and then transformed
+        back to the lab frame. For a quadrupole lens: F = -dV/dE * ∇|E|
 
         Args:
-            t (float): time [s]
+            t (float): Time [s] (unused, kept for interface compatibility)
             x (Union[NDArray[np.float64], float]): x coordinate(s) [m]
             y (Union[NDArray[np.float64], float]): y coordinate(s) [m]
             z (Union[NDArray[np.float64], float]): z coordinate(s) [m]
 
         Returns:
-            List: force in x, y and z
+            Tuple of force components (Fx, Fy, Fz) in Newtons
         """
-        _x, _y, _z = self.coordinate_transformation(x,y,z)
-        r = np.sqrt(_x**2 + _y**2)
-        if r == 0:
-            dx = 0.0
-            dy = 0.0
+        # 1) Transform to lens coordinates (x', y', z')
+        _x, _y, _z = self.coordinate_transformation(x, y, z)
+
+        # 2) Compute radius and unit vectors in lens frame
+        r = np.hypot(_x, _y)
+        if np.isscalar(x):
+            dx = 0.0 if r == 0.0 else _x / r
+            dy = 0.0 if r == 0.0 else _y / r
         else:
-            dx = _x / r
-            dy = _y / r
-        stark = -self.stark_potential_derivative(
-            x, y, z
-        ) * self.electric_field_derivative_r(x, y, z)
-        Fy = stark * dy
-        if isinstance(x, np.ndarray):
-            return (stark * dx, Fy * np.cos(self.tilt), - Fy * np.sin(self.tilt), np.zeros_like(x))
-        else:
-            return (stark * dx, Fy * np.cos(self.tilt), - Fy * np.sin(self.tilt), 0.0)
+            dx = np.divide(_x, r, out=np.zeros_like(_x, dtype=float), where=r != 0.0)
+            dy = np.divide(_y, r, out=np.zeros_like(_y, dtype=float), where=r != 0.0)
+
+        # 3) Electric field magnitude and Stark gradient in lens frame
+        # For quadrupole: E = k*r, dE/dr = k (constant)
+        E = self._k * r
+        dVdE = self._stark_potential_derivative(E)
+        stark_grad = -dVdE * self._k  # Force coefficient: -dV/dE * dE/dr
+
+        # 4) Force components in lens frame (purely transverse, no z-component)
+        fx_rot = stark_grad * dx
+        fy_rot = stark_grad * dy
+
+        # 5) Rotate back to lab frame using inverse rotation R_x(-tilt)
+        # Since fz_rot = 0, the rotation simplifies to:
+        # fx_lab = fx_rot
+        # fy_lab = fy_rot * cos(tilt)
+        # fz_lab = -fy_rot * sin(tilt)
+        return (fx_rot, fy_rot * self._cos_tilt, -fy_rot * self._sin_tilt)
 
     def force_fast_scalar(
         self, t: float, x: float, y: float, z: float
     ) -> tuple[float, float, float]:
-        return _force_eql_scalar(
+        if abs(self._sin_tilt) < 1e-12:
+            return _force_eql_scalar(
+                x,
+                y,
+                self.x0,
+                self.y0,
+                self._k,
+                self._stark_deriv_coef,
+            )
+        return _force_eql_scalar_tilt(
             x,
             y,
             z,
             self.x0,
             self.y0,
-            self.V,
-            self.R,
-            self._stark_potential_derivative.coef,
+            self._k,
             self._cos_tilt,
-            self._sin_tilt
+            self._sin_tilt,
+            self._stark_deriv_coef,
         )
 
     def stark_potential_derivative(
@@ -519,18 +601,23 @@ lens_coeffs_default = np.array(
 
 class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
     """
-    Electrostatic quadrupole lens using a 2D polynomial potential.
+    Electrostatic lens using a 2D polynomial potential with optional z-dependence.
 
     This class extends ElectrostaticQuadrupoleLens by representing the lens
-    potential as a 2D polynomial in x and y, scaled by the applied voltage V,
-    with an optional z-dependence for more realistic field modeling.
+    potential as Φ(x,y,z) = Φ_xy(x,y) * Φ_z(z), where Φ_xy is a 2D polynomial
+    scaled by voltage V, and Φ_z provides optional z-dependence for more
+    realistic field modeling.
+
+    Electric field: E = -∇Φ = [-∂Φ_xy/∂x * Φ_z, -∂Φ_xy/∂y * Φ_z, -Φ_xy * ∂Φ_z/∂z]
+    Stark force: F = -dV/dE * ∇|E|
 
     Attributes:
-        _potential_xy_at_unit_voltage (Polynomial2D): Base polynomial potential at unit voltage.
-        potential_xy (Polynomial2D): Scaled polynomial by current voltage.
-        potential_z (Callable[[NDArray_or_Float], NDArray_or_Float]): Z-dependence of the potential.
-        Ex, Ey (Polynomial2D): Electric field components -∂Φ/∂x, -∂Φ/∂y.
-        Ex_x, Ex_y, Ey_x, Ey_y (Polynomial2D): Second derivatives of potential.
+        _potential_xy_at_unit_voltage (Polynomial2D): Base polynomial potential at 1V.
+        potential_xy (Polynomial2D): Voltage-scaled polynomial Φ_xy(x,y) = V * Φ_unit(x,y).
+        potential_z (Callable): Z-dependence function Φ_z(z), default=1.0 (constant).
+        potential_z_derivative (Callable): Derivative dΦ_z/dz, default=0.0.
+        Ex, Ey (Polynomial2D): Field components -∂Φ_xy/∂x, -∂Φ_xy/∂y.
+        Ex_x, Ex_y, Ey_x, Ey_y (Polynomial2D): Second derivatives for gradient calculations.
     """
 
     def __init__(
@@ -543,12 +630,16 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         R: float,
         x: float = 0,
         y: float = 0,
+        tilt: float = 0,
         save_collisions: bool = False,
         stark_potential: None | npt.NDArray[np.float64] = None,
         potential_xy: Polynomial2D = Polynomial2D(
             kx=6, ky=6, coeffs=lens_coeffs_default
         ),
         potential_z: Optional[Callable[[NDArray_or_Float], NDArray_or_Float]] = None,
+        potential_z_derivative: Optional[
+            Callable[[NDArray_or_Float], NDArray_or_Float]
+        ] = None,
     ) -> None:
         """
         Initialize a polynomial-based electrostatic lens.
@@ -562,11 +653,14 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
             R: Lens bore radius [m] (for parent class consistency).
             x: Lens center x-coordinate [m].
             y: Lens center y-coordinate [m].
+            tilt: Tilt angle of the lens around x-axis [radians].
             save_collisions: Whether to record collisions inside this lens.
             stark_potential: Optional custom Stark potential coefficients.
             potential_xy: 2D polynomial defining unit-voltage potential in xy-plane.
             potential_z: Function defining z-dependence of potential. If None,
                          a constant function returning 1.0 will be used.
+            potential_z_derivative: Function defining d(potential_z)/dz. If None,
+                         a constant function returning 0.0 will be used (no z-field).
         """
         self._potential_xy = potential_xy
         self._V = V
@@ -588,8 +682,37 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
             self.potential_z = _potential_z
         else:
             self.potential_z = potential_z
+
+        if potential_z_derivative is None:
+
+            @overload
+            def _potential_z_derivative(z: float) -> float: ...
+            @overload
+            def _potential_z_derivative(
+                z: npt.NDArray[np.float64],
+            ) -> npt.NDArray[np.float64]: ...
+
+            def _potential_z_derivative(z):
+                if isinstance(z, np.ndarray):
+                    return np.zeros(z.shape)
+                else:
+                    return 0.0
+
+            self.potential_z_derivative = _potential_z_derivative
+        else:
+            self.potential_z_derivative = potential_z_derivative
         super().__init__(
-            name, objects, start, stop, V, R, x, y, save_collisions, stark_potential
+            name,
+            objects,
+            start,
+            stop,
+            V,
+            R,
+            x,
+            y,
+            tilt,
+            save_collisions,
+            stark_potential,
         )
         self._initialize_fields()
 
@@ -615,9 +738,22 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         self._initialize_fields()
 
     def _initialize_fields(self) -> None:
-        """Initialize polynomial field components and their derivatives."""
+        """
+        Initialize polynomial electric field components and their derivatives.
+
+        Computes E = -∇Φ_xy and the Hessian matrix (second derivatives) needed
+        for force gradient calculations. These polynomials are evaluated efficiently
+        during force calculations.
+
+        Sets:
+            Ex, Ey: Electric field components -∂Φ_xy/∂x, -∂Φ_xy/∂y
+            Ex_x, Ex_y, Ey_x, Ey_y: Second derivatives ∂²Φ_xy/∂x∂y for ∇|E|
+        """
+        # First derivatives: electric field components
         self.Ex = self.potential_xy.derivative("x")
         self.Ey = self.potential_xy.derivative("y")
+
+        # Second derivatives: needed for gradient of field magnitude
         self.Ex_x = self.Ex.derivative("x")
         self.Ex_y = self.Ex.derivative("y")
         self.Ey_x = self.Ey.derivative("x")
@@ -627,15 +763,19 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         self, x: NDArray_or_Float, y: NDArray_or_Float, z: NDArray_or_Float
     ) -> NDArray_or_Float:
         """
-        Evaluate Stark potential at (x,y,z) based on polynomial electric field magnitude.
+        Evaluate Stark potential energy at position (x,y,z).
+
+        The Stark potential V(x,y,z) = V_Stark(|E(x,y,z)|) is computed from the
+        electric field magnitude. This uses the polynomial field model including
+        z-dependence: E = [-∂Φ_xy/∂x * Φ_z, -∂Φ_xy/∂y * Φ_z, -Φ_xy * ∂Φ_z/∂z].
 
         Args:
-            x: X-coordinates where potential is evaluated [m].
-            y: Y-coordinates where potential is evaluated [m].
-            z: Z-coordinates where potential is evaluated [m].
+            x: X-coordinates where potential is evaluated [m]
+            y: Y-coordinates where potential is evaluated [m]
+            z: Z-coordinates where potential is evaluated [m]
 
         Returns:
-            Stark potential (energy) as function of |E| at the given points [J].
+            Stark potential energy as function of |E| at the given points [J]
         """
         electric_field = np.linalg.norm(self.electric_field(x, y, z), axis=0)
         return self._stark_potential(electric_field)
@@ -647,6 +787,10 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         Compute electric field vector from the 2D polynomial potential.
 
         The field includes z-dependence through potential_z(z).
+        Ez = -Φ_xy(x,y) * dΦ_z/dz
+
+        The field is computed in the rotated lens frame and then rotated back
+        to the lab frame to account for lens tilt.
 
         Args:
             x: X-coordinates [m].
@@ -654,35 +798,49 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
             z: Z-coordinates [m].
 
         Returns:
-            Array of electric field components [Ex, Ey, Ez=0] in V/m.
+            Array of electric field components [Ex, Ey, Ez] in V/m (in lab frame).
         """
-        _x = self.x_transformed(x)
-        _y = self.y_transformed(y)
-        pot_z = self.potential_z(z)
-        if isinstance(_x, np.ndarray):
-            return np.asarray(
-                [
-                    pot_z * self.Ex(_x, _y),
-                    pot_z * self.Ey(_x, _y),
-                    np.zeros(_x.shape),
-                ]
-            )
-        else:
-            return pot_z * np.asarray([self.Ex(_x, _y), self.Ey(_x, _y), 0.0])
+        _x, _y, _z = self.coordinate_transformation(x, y, z)
+        pot_z = self.potential_z(_z)
+        pot_z_deriv = self.potential_z_derivative(_z)
+
+        # 1) Evaluate xy potential at transformed coordinates
+        potential_xy_val = self.potential_xy(_x, _y)
+
+        # 2) Calculate electric field in rotated lens frame
+        # E = -∇Φ = [-∂Φ_xy/∂x * Φ_z, -∂Φ_xy/∂y * Φ_z, -Φ_xy * ∂Φ_z/∂z]
+        Ex_rot = pot_z * self.Ex(_x, _y)
+        Ey_rot = pot_z * self.Ey(_x, _y)
+        Ez_rot = -potential_xy_val * pot_z_deriv
+
+        # 3) Rotate field back to lab frame using inverse rotation R_x(-tilt)
+        # For rotation around x-axis:
+        #   E_x_lab = E_x_rot
+        #   E_y_lab = E_y_rot * cos(tilt) + E_z_rot * sin(tilt)
+        #   E_z_lab = -E_y_rot * sin(tilt) + E_z_rot * cos(tilt)
+        Ex_lab = Ex_rot
+        Ey_lab = Ey_rot * self._cos_tilt + Ez_rot * self._sin_tilt
+        Ez_lab = -Ey_rot * self._sin_tilt + Ez_rot * self._cos_tilt
+
+        return np.asarray([Ex_lab, Ey_lab, Ez_lab])
 
     def stark_potential_derivative(
         self, x: NDArray_or_Float, y: NDArray_or_Float, z: NDArray_or_Float
     ) -> NDArray_or_Float:
         """
-        Compute derivative d(Stark)/dE at (x,y,z) using the polynomial field.
+        Compute derivative of Stark potential with respect to electric field magnitude.
+
+        Returns dV_Stark/dE evaluated at position (x,y,z), where E = |E(x,y,z)| is
+        the electric field magnitude from the polynomial model. This derivative is
+        used in the force calculation: F = -dV/dE * ∇|E|.
 
         Args:
-            x: X-coordinates where derivative is evaluated [m].
-            y: Y-coordinates where derivative is evaluated [m].
-            z: Z-coordinates where derivative is evaluated [m].
+            x: X-coordinates where derivative is evaluated [m]
+            y: Y-coordinates where derivative is evaluated [m]
+            z: Z-coordinates where derivative is evaluated [m]
 
         Returns:
-            d(Stark potential)/dE evaluated at |E|(x,y,z) [J/(V/m)].
+            dV_Stark/dE evaluated at |E|(x,y,z) [J/(V/m)]
         """
         E = np.linalg.norm(self.electric_field(x, y, z), axis=0)
         return self._stark_potential_derivative(E)
@@ -691,39 +849,67 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         self, t: float, x: NDArray_or_Float, y: NDArray_or_Float, z: NDArray_or_Float
     ) -> tuple[NDArray_or_Float, NDArray_or_Float, NDArray_or_Float]:
         """
-        Calculate force on a particle due to Stark interaction in polynomial lens.
+        Calculate Stark force on a particle in the polynomial lens.
 
-        Uses F = –(dStark/dE) ∇|E|, where |E| is from the 2D polynomial with z-dependence.
-        Optimized for performance with reduced redundant calculations.
+        Computes F = -dV/dE * ∇|E| where the electric field includes z-dependence:
+        E = [-∂Φ_xy/∂x * Φ_z, -∂Φ_xy/∂y * Φ_z, -Φ_xy * ∂Φ_z/∂z]
+
+        The force is computed in the rotated lens frame and then transformed
+        back to the lab frame to account for lens tilt.
 
         Args:
-            t: Time [s] (unused; included for interface compatibility).
-            x: X-position(s) [m].
-            y: Y-position(s) [m].
-            z: Z-position(s) [m].
+            t: Time [s] (unused, kept for interface compatibility)
+            x: X-position(s) in lab frame [m]
+            y: Y-position(s) in lab frame [m]
+            z: Z-position(s) in lab frame [m]
 
         Returns:
-            Tuple of force components (Fx, Fy, Fz=0) in Newtons.
+            Tuple of force components (Fx, Fy, Fz) in Newtons (lab frame)
         """
-        # Transform coordinates once
-        _x = self.x_transformed(x)
-        _y = self.y_transformed(y)
-        pot_z = self.potential_z(z)
+        # 1) Transform coordinates to lens frame (translation + rotation)
+        _x, _y, _z = self.coordinate_transformation(x, y, z)
+        # 2) Evaluate z-dependence functions
+        pot_z = self.potential_z(_z)  # type: ignore[arg-type]
+        pot_z_deriv = self.potential_z_derivative(_z)  # type: ignore[arg-type]
 
-        # Get electric field components directly
-        Ex = pot_z * self.Ex(_x, _y)
-        Ey = pot_z * self.Ey(_x, _y)
+        # 3) Evaluate xy potential and its polynomial components
+        potential_xy_val = self.potential_xy(_x, _y)
 
-        # Get field derivatives
-        Ex_x = pot_z * self.Ex_x(_x, _y)
-        Ex_y = pot_z * self.Ex_y(_x, _y)
-        Ey_x = pot_z * self.Ey_x(_x, _y)
-        Ey_y = pot_z * self.Ey_y(_x, _y)
+        # 4) Calculate electric field in rotated lens frame
+        # E = -∇Φ = [-∂Φ_xy/∂x * Φ_z, -∂Φ_xy/∂y * Φ_z, -Φ_xy * ∂Φ_z/∂z]
+        Ex_rot = pot_z * self.Ex(_x, _y)
+        Ey_rot = pot_z * self.Ey(_x, _y)
+        Ez_rot = -potential_xy_val * pot_z_deriv
 
-        # Calculate field magnitude with safe handling of small values
-        electric_field = np.sqrt(Ex**2 + Ey**2)
+        # 5) Calculate field component derivatives (Hessian matrix elements)
+        Ex_x_rot = pot_z * self.Ex_x(_x, _y)
+        Ex_y_rot = pot_z * self.Ex_y(_x, _y)
+        Ey_x_rot = pot_z * self.Ey_x(_x, _y)
+        Ey_y_rot = pot_z * self.Ey_y(_x, _y)
 
-        # Handle division by zero safely
+        # 6) Calculate Ez derivatives in rotated frame
+        # Ez_rot = -Φ_xy * dΦ_z/dz', so:
+        # ∂Ez/∂x' = -∂Φ_xy/∂x' * ∂Φ_z/∂z' = (Ex_rot/pot_z) * pot_z_deriv
+        # ∂Ez/∂y' = -∂Φ_xy/∂y' * ∂Φ_z/∂z' = (Ey_rot/pot_z) * pot_z_deriv
+        if isinstance(pot_z, np.ndarray):
+            safe_pot_z = np.where(np.abs(pot_z) > 1e-15, pot_z, 1.0)
+            Ez_x_rot = pot_z_deriv * Ex_rot / safe_pot_z
+            Ez_y_rot = pot_z_deriv * Ey_rot / safe_pot_z
+        else:
+            if np.abs(pot_z) > 1e-15:
+                Ez_x_rot = pot_z_deriv * Ex_rot / pot_z
+                Ez_y_rot = pot_z_deriv * Ey_rot / pot_z
+            else:
+                Ez_x_rot = 0.0
+                Ez_y_rot = 0.0
+
+        # Note: ∂Ez/∂z' would require ∂²Φ_z/∂z'², which we approximate as 0
+        # This is exact when potential_z is linear, and a good approximation otherwise
+
+        # 7) Calculate electric field magnitude |E| (rotation-invariant scalar)
+        electric_field = np.sqrt(Ex_rot**2 + Ey_rot**2 + Ez_rot**2)
+
+        # 8) Handle division by zero safely for 1/|E|
         mask = electric_field > 1e-15
         if isinstance(electric_field, np.ndarray):
             electric_field_inverse = np.zeros_like(electric_field)
@@ -731,42 +917,105 @@ class ElectrostaticLensPolynomial(ElectrostaticQuadrupoleLens):
         else:
             electric_field_inverse = 1.0 / electric_field if mask else 0.0
 
-        # Calculate gradient of the field magnitude
-        dEx = (Ex * Ex_x + Ey * Ey_x) * electric_field_inverse
-        dEy = (Ex * Ex_y + Ey * Ey_y) * electric_field_inverse
+        # 9) Calculate gradient of field magnitude: ∇|E| = (E·∇E)/|E|
+        # x and y components in rotated frame
+        d_Emag_dx_rot = (
+            Ex_rot * Ex_x_rot + Ey_rot * Ey_x_rot + Ez_rot * Ez_x_rot
+        ) * electric_field_inverse
+        d_Emag_dy_rot = (
+            Ex_rot * Ex_y_rot + Ey_rot * Ey_y_rot + Ez_rot * Ez_y_rot
+        ) * electric_field_inverse
 
-        # Get Stark potential derivative at the field magnitude
-        stark_potential_derivative = self._stark_potential_derivative(electric_field)
-
-        # Calculate forces
-        Fx = -stark_potential_derivative * dEx
-        Fy = -stark_potential_derivative * dEy
-
-        # Return optimized result
-        if isinstance(x, np.ndarray):
-            return Fx, Fy, np.zeros_like(x)
+        # z component requires ∂Ex/∂z', ∂Ey/∂z', ∂Ez/∂z'
+        # Since Ex_rot = pot_z * Ex_poly, we have ∂Ex_rot/∂z' = pot_z_deriv * Ex_poly
+        # Similarly for Ey_rot. We neglect ∂Ez_rot/∂z' (requires ∂²Φ_z/∂z'²)
+        if isinstance(pot_z, np.ndarray):
+            safe_pot_z_z = np.where(np.abs(pot_z) > 1e-15, pot_z, 1.0)
+            Ex_poly = Ex_rot / safe_pot_z_z
+            Ey_poly = Ey_rot / safe_pot_z_z
         else:
-            return Fx, Fy, 0.0
+            Ex_poly = Ex_rot / pot_z if np.abs(pot_z) > 1e-15 else 0.0
+            Ey_poly = Ey_rot / pot_z if np.abs(pot_z) > 1e-15 else 0.0
+
+        d_Emag_dz_rot = (
+            Ex_rot * pot_z_deriv * Ex_poly + Ey_rot * pot_z_deriv * Ey_poly
+        ) * electric_field_inverse
+
+        # 10) Calculate Stark force: F = -dV/dE * ∇|E|
+        stark_deriv = self._stark_potential_derivative(electric_field)
+
+        # Force components in rotated frame
+        Fx_rot = -stark_deriv * d_Emag_dx_rot
+        Fy_rot = -stark_deriv * d_Emag_dy_rot
+        Fz_rot = -stark_deriv * d_Emag_dz_rot
+
+        # 11) Rotate forces back to lab frame using inverse rotation R_x(-tilt)
+        # For rotation around x-axis:
+        #   F_x_lab = F_x_rot
+        #   F_y_lab = F_y_rot * cos(tilt) + F_z_rot * sin(tilt)
+        #   F_z_lab = -F_y_rot * sin(tilt) + F_z_rot * cos(tilt)
+        Fx_lab = Fx_rot
+        Fy_lab = Fy_rot * self._cos_tilt + Fz_rot * self._sin_tilt
+        Fz_lab = -Fy_rot * self._sin_tilt + Fz_rot * self._cos_tilt
+
+        return Fx_lab, Fy_lab, Fz_lab
 
     def force_fast_scalar(
         self, t: float, x: float, y: float, z: float
     ) -> tuple[float, float, float]:
-        pot_z = self.potential_z(z)
+        """
+        Compute Stark force using JIT-compiled numba functions for optimal performance.
 
-        return _force_eql_poly_scalar(
-            x,
-            y,
-            self.x0,
-            self.y0,
-            pot_z,
-            self.Ex.coeffs,
-            self.Ey.coeffs,
-            self.Ex_x.coeffs,
-            self.Ex_y.coeffs,
-            self.Ey_x.coeffs,
-            self.Ey_y.coeffs,
-            self._stark_potential_derivative.coef,
-        )
+        This method dispatches to different implementations based on whether the lens
+        has a tilt angle, avoiding unnecessary coordinate transformations when not needed.
+
+        Parameters:
+            t: Time (kept for interface compatibility, unused)
+            x, y, z: Position coordinates in lab frame (meters)
+
+        Returns:
+            Tuple of (Fx, Fy, Fz) force components in lab frame (Newtons)
+        """
+        # 1) Transform coordinates to lens frame to evaluate potential_z
+        _x, _y, _z = self.coordinate_transformation(x, y, z)
+        pot_z = self.potential_z(_z)
+
+        # 2) Dispatch to appropriate JIT-compiled function based on tilt
+        if abs(self._sin_tilt) < 1e-12:
+            # No tilt: use simplified version without rotation overhead
+            return _force_eql_poly_scalar(
+                x,
+                y,
+                self.x0,
+                self.y0,
+                pot_z,
+                self.Ex.coeffs,
+                self.Ey.coeffs,
+                self.Ex_x.coeffs,
+                self.Ex_y.coeffs,
+                self.Ey_x.coeffs,
+                self.Ey_y.coeffs,
+                self._stark_deriv_coef,
+            )
+        else:
+            # With tilt: use full transformation including rotation
+            return _force_eql_poly_scalar_tilt(
+                x,
+                y,
+                z,
+                self.x0,
+                self.y0,
+                self._cos_tilt,
+                self._sin_tilt,
+                pot_z,
+                self.Ex.coeffs,
+                self.Ey.coeffs,
+                self.Ex_x.coeffs,
+                self.Ex_y.coeffs,
+                self.Ey_x.coeffs,
+                self.Ey_y.coeffs,
+                self._stark_deriv_coef,
+            )
 
 
 class MagnetostaticHexapoleLens(ODESection):
@@ -1038,7 +1287,8 @@ class CircularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
+        xp = cp.get_array_module(stop.z)
+        assert xp.allclose(stop.z, self.z), (
             "supplied coordinates not at location of aperture"
         )
         return (stop.x - self.x) ** 2 + (stop.y - self.y) ** 2 <= self.r**2
@@ -1084,11 +1334,12 @@ class RectangularAperture(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
+        xp = cp.get_array_module(stop.z)
+        assert xp.allclose(stop.z, self.z), (
             "supplied coordinates not at location of aperture"
         )
-        return (np.abs((stop.x - self.x)) <= self.wx / 2) & (
-            np.abs((stop.y - self.y)) <= self.wy / 2
+        return (xp.abs((stop.x - self.x)) <= self.wx / 2) & (
+            xp.abs((stop.y - self.y)) <= self.wy / 2
         )
 
     def collision_event_function(self, x: float, y: float, z: float) -> float:
@@ -1141,14 +1392,15 @@ class RectangularApertureFinite(BeamlineObject):
             np.ndarray: boolean array where True indicates coordinates are within the
             aperture
         """
-        assert np.allclose(stop.z, self.z), (
+        xp = cp.get_array_module(stop.z)
+        assert xp.allclose(stop.z, self.z), (
             "supplied coordinates not at location of aperture"
         )
-        inside_aperture = (np.abs((stop.x - self.x)) <= self.wx / 2) & (
-            np.abs((stop.y - self.y)) <= self.wy / 2
+        inside_aperture = (xp.abs((stop.x - self.x)) <= self.wx / 2) & (
+            xp.abs((stop.y - self.y)) <= self.wy / 2
         )
-        outside_plate = (np.abs((stop.x - self.x)) >= self.wxp / 2) & (
-            np.abs((stop.y - self.y)) >= self.wyp / 2
+        outside_plate = (xp.abs((stop.x - self.x)) >= self.wxp / 2) & (
+            xp.abs((stop.y - self.y)) >= self.wyp / 2
         )
         return inside_aperture | outside_plate
 
@@ -1222,6 +1474,7 @@ class PlateElectrodes(BeamlineObject):
                 - Coordinates of collisions.
                 - Velocities at collisions.
         """
+        xp = cp.get_array_module(start.x)
         # Calculate time to reach the plates
         dx_upper = (self.x + self.separation / 2) - start.x
         dx_lower = (self.x - self.separation / 2) - start.x
@@ -1231,12 +1484,12 @@ class PlateElectrodes(BeamlineObject):
         t_lower = calculate_time_ballistic(dx_lower, vels.vx, acceleration.ax)
 
         # Propagate positions and velocities
-        t = np.where(vels.vx > 0, t_upper, t_lower)
+        t = xp.where(vels.vx > 0, t_upper, t_lower)
         x, v = propagate_ballistic(t, start, vels, acceleration)
 
         # Check if collisions occur within the plate bounds
         mask = (self.z <= x.z) & (x.z <= self.z + self.length)
-        mask &= abs(x.y - self.y) <= self.width / 2
+        mask &= xp.abs(x.y - self.y) <= self.width / 2
 
         return mask, x.get_masked(mask), v.get_masked(mask)
 
@@ -1320,6 +1573,15 @@ class Bore(BeamlineObject):
             or self.z + self.length < stop
         )
 
+    def check_in_bounds_vectorized(
+        self,
+        x: npt.NDArray[np.float64],
+        y: npt.NDArray[np.float64],
+        z: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.bool_]:
+        mask = ((x - self.x) ** 2 + (y - self.y) ** 2) <= self.radius**2
+        return mask
+
     def get_acceptance(
         self,
         start: Coordinates,
@@ -1339,9 +1601,10 @@ class Bore(BeamlineObject):
         Returns:
             npt.NDArray[np.bool_]: Boolean array indicating particle acceptance.
         """
+        xp = cp.get_array_module(stop.z)
         mask_z = (stop.z >= self.z) & (stop.z <= self.z + self.length)
         mask_r = ((stop.x - self.x) ** 2 + (stop.y - self.y) ** 2) > self.radius**2
-        accept_array = np.ones(stop.x.shape, dtype=np.bool_)
+        accept_array = xp.ones(stop.x.shape, dtype=bool)
         accept_array[mask_z & mask_r] = False
         return accept_array
 
@@ -1357,12 +1620,14 @@ class Bore(BeamlineObject):
         Returns:
             float: Value of the collision event function.
         """
-        r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+        # r = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
 
         # z_factor for checking if z coordinates are within the bore
-        z_factor = int(not bounds_check_tolerance(z, self.z, self.z + self.length))
+        # z_factor = int(not bounds_check_tolerance(z, self.z, self.z + self.length))
 
-        return (r - self.radius) + z_factor
+        # return r - self.radius  # + z_factor
+        r2 = (x - self.x) ** 2 + (y - self.y) ** 2
+        return r2 - self.radius**2
 
     def get_collisions_linear(
         self,
@@ -1461,6 +1726,7 @@ class Bore(BeamlineObject):
             # ----- exact peak radius (isotropic) ---------------------------
             AA, BB, AB = (
                 Ax[i] ** 2 + Ay[i] ** 2,
+               
                 Bx[i] ** 2 + By[i] ** 2,
                 Ax[i] * Bx[i] + Ay[i] * By[i],
             )

@@ -231,7 +231,7 @@ class Velocities:
 
     def append_from_ode(
         self,
-        sol: OdeResult,
+        sol: OdeResultLike,
         save_start: bool = True,
         v_indices: npt.NDArray[np.int32] = np.array([3, 4, 5]),
     ) -> None:
